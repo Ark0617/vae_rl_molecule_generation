@@ -48,6 +48,7 @@ def huber_loss(x, delta=1.0):
 # Global session
 # ================================================================
 
+
 def make_session(num_cpu=None, make_default=False):
     """Returns a session that will use <num_cpu> CPU's only"""
     if num_cpu is None:
@@ -61,9 +62,11 @@ def make_session(num_cpu=None, make_default=False):
     else:
         return tf.Session(config=tf_config)
 
+
 def single_threaded_session():
     """Returns a session which will only use a single CPU"""
     return make_session(num_cpu=1)
+
 
 def in_session(f):
     @functools.wraps(f)
@@ -73,6 +76,7 @@ def in_session(f):
     return newfunc
 
 ALREADY_INITIALIZED = set()
+
 
 def initialize():
     """Initialize all the uninitialized variables in the global scope."""
@@ -237,6 +241,7 @@ class SetFromFlat(object):
     def __call__(self, theta):
         tf.get_default_session().run(self.op, feed_dict={self.theta: theta})
 
+
 class GetFlat(object):
     def __init__(self, var_list):
         self.op = tf.concat(axis=0, values=[tf.reshape(v, [numel(v)]) for v in var_list])
@@ -244,7 +249,9 @@ class GetFlat(object):
     def __call__(self):
         return tf.get_default_session().run(self.op)
 
+
 _PLACEHOLDER_CACHE = {}  # name -> (placeholder, dtype, shape)
+
 
 def get_placeholder(name, dtype, shape):
     if name in _PLACEHOLDER_CACHE:
@@ -256,8 +263,10 @@ def get_placeholder(name, dtype, shape):
         _PLACEHOLDER_CACHE[name] = (out, dtype, shape)
         return out
 
+
 def get_placeholder_cached(name):
     return _PLACEHOLDER_CACHE[name][0]
+
 
 def flattenallbut0(x):
     return tf.reshape(x, [-1, intprod(x.get_shape().as_list()[1:])])

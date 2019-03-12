@@ -10,7 +10,8 @@ import tensorflow as tf
 import gym
 from gym_molecule.envs.molecule import GraphEnv
 
-def train(args,seed,writer=None):
+
+def train(args, seed, writer=None):
     from baselines.ppo1 import pposgd_simple_gcn, gcn_policy
     import baselines.common.tf_util as U
     rank = MPI.COMM_WORLD.Get_rank()
@@ -22,18 +23,19 @@ def train(args,seed,writer=None):
         logger.configure(format_strs=[])
     workerseed = seed + 10000 * MPI.COMM_WORLD.Get_rank()
     set_global_seeds(workerseed)
-    if args.env=='molecule':
+    if args.env == 'molecule':
         env = gym.make('molecule-v0')
-        env.init(data_type=args.dataset,logp_ratio=args.logp_ratio,qed_ratio=args.qed_ratio,sa_ratio=args.sa_ratio,reward_step_total=args.reward_step_total,is_normalize=args.normalize_adj,reward_type=args.reward_type,reward_target=args.reward_target,has_feature=bool(args.has_feature),is_conditional=bool(args.is_conditional),conditional=args.conditional,max_action=args.max_action,min_action=args.min_action) # remember call this after gym.make!!
-    elif args.env=='graph':
+        env.init(data_type=args.dataset, logp_ratio=args.logp_ratio, qed_ratio=args.qed_ratio, sa_ratio=args.sa_ratio, recons_ratio=args.recons_ratio, reward_step_total=args.reward_step_total, is_normalize=args.normalize_adj, reward_type=args.reward_type, reward_target=args.reward_target, has_feature=bool(args.has_feature), is_conditional=bool(args.is_conditional), conditional=args.conditional, max_action=args.max_action, min_action=args.min_action)  # remember call this after gym.make!!
+    elif args.env == 'graph':
         env = GraphEnv()
-        env.init(reward_step_total=args.reward_step_total,is_normalize=args.normalize_adj,dataset=args.dataset) # remember call this after gym.make!!
+        env.init(reward_step_total=args.reward_step_total, is_normalize=args.normalize_adj, dataset=args.dataset) # remember call this after gym.make!!
     print(env.observation_space)
+
     def policy_fn(name, ob_space, ac_space):
-        return gcn_policy.GCNPolicy(name=name, ob_space=ob_space, ac_space=ac_space, atom_type_num=env.atom_type_num,args=args)
+        return gcn_policy.GCNPolicy(name=name, ob_space=ob_space, ac_space=ac_space, atom_type_num=env.atom_type_num, args=args)
     env.seed(workerseed)
 
-    pposgd_simple_gcn.learn(args,env, policy_fn,
+    pposgd_simple_gcn.learn(args, env, policy_fn,
         max_timesteps=args.num_steps,
         timesteps_per_actorbatch=256,
         clip_param=0.2, entcoeff=0.01,
@@ -43,6 +45,7 @@ def train(args,seed,writer=None):
     )
     env.close()
 
+
 def arg_parser():
     """
     Create an empty argparse.ArgumentParser.
@@ -50,6 +53,7 @@ def arg_parser():
     import argparse
     return argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
 
 def molecule_arg_parser():
     parser = arg_parser()
@@ -60,15 +64,19 @@ def molecule_arg_parser():
     parser.add_argument('--name', type=str, default='test_conditional')
     parser.add_argument('--name_load', type=str, default='0new_concatno_mean_layer3_expert1500')
     # parser.add_argument('--name_load', type=str, default='test')
-    parser.add_argument('--dataset', type=str, default='zinc',help='caveman; grid; ba; zinc; gdb')
+    parser.add_argument('--dataset', type=str, default='zinc', help='caveman; grid; ba; zinc; gdb; qm9')
     parser.add_argument('--dataset_load', type=str, default='zinc')
-    parser.add_argument('--reward_type', type=str, default='logppen',help='logppen;logp_target;qed;qedsa;qed_target;mw_target;gan')
-    parser.add_argument('--reward_target', type=float, default=0.5,help='target reward value')
+    parser.add_argument('--reward_type', type=str, default='logppen', help='logppen;logp_target;qed;qedsa;qed_target;mw_target;gan')
+    parser.add_argument('--reward_target', type=float, default=0.5, help='target reward value')
     parser.add_argument('--logp_ratio', type=float, default=1)
     parser.add_argument('--qed_ratio', type=float, default=1)
     parser.add_argument('--sa_ratio', type=float, default=1)
     parser.add_argument('--gan_step_ratio', type=float, default=1)
     parser.add_argument('--gan_final_ratio', type=float, default=1)
+    parser.add_argument('--kl_expert_ratio', type=float, default=1)
+    parser.add_argument('--kl_ppo_ratio', type=float, default=0.5)
+    parser.add_argument('--kl_g_ratio', type=float, default=0.5)
+    parser.add_argument('--recons_ratio', type=float, default=1)
     parser.add_argument('--reward_step_total', type=float, default=0.5)
     parser.add_argument('--lr', type=float, default=1e-3)
     # parser.add_argument('--has_rl', type=int, default=1)
@@ -76,6 +84,7 @@ def molecule_arg_parser():
     parser.add_argument('--has_d_step', type=int, default=1)
     parser.add_argument('--has_d_final', type=int, default=1)
     parser.add_argument('--has_ppo', type=int, default=1)
+    parser.add_argument('--has_cond', type=int, default=1)
     parser.add_argument('--rl_start', type=int, default=250)
     parser.add_argument('--rl_end', type=int, default=int(1e6))
     parser.add_argument('--expert_start', type=int, default=0)
@@ -91,12 +100,13 @@ def molecule_arg_parser():
     parser.add_argument('--normalize_adj', type=int, default=0)
     parser.add_argument('--layer_num_g', type=int, default=3)
     parser.add_argument('--layer_num_d', type=int, default=3)
+    parser.add_argument('--layer_num_cond', type=int, default=3)
     parser.add_argument('--graph_emb', type=int, default=0)
     parser.add_argument('--stop_shift', type=int, default=-3)
     parser.add_argument('--has_residual', type=int, default=0)
     parser.add_argument('--has_concat', type=int, default=0)
     parser.add_argument('--has_feature', type=int, default=0)
-    parser.add_argument('--emb_size', type=int, default=128) # default 64
+    parser.add_argument('--emb_size', type=int, default=128)  # default 64
     parser.add_argument('--gcn_aggregate', type=str, default='mean')# sum, mean, concat
     parser.add_argument('--gan_type', type=str, default='normal')# normal, recommend, wgan
     parser.add_argument('--gate_sum_d', type=int, default=0)
@@ -106,10 +116,12 @@ def molecule_arg_parser():
     parser.add_argument('--max_action', type=int, default=128) # default 0
     parser.add_argument('--min_action', type=int, default=20) # default 0
     parser.add_argument('--bn', type=int, default=0)
-    parser.add_argument('--name_full',type=str,default='')
-    parser.add_argument('--name_full_load',type=str,default='')
+    parser.add_argument('--name_full', type=str, default='')
+    parser.add_argument('--name_full_load', type=str, default='')
+    parser.add_argument('--is_train', type=int, default=1)
 
     return parser
+
 
 def main():
     args = molecule_arg_parser().parse_args()
@@ -127,7 +139,8 @@ def main():
         writer = SummaryWriter(comment='_'+args.dataset+'_'+args.name)
     else:
         writer = None
-    train(args,seed=args.seed,writer=writer)
+    train(args, seed=args.seed, writer=writer)
+
 
 if __name__ == '__main__':
     main()

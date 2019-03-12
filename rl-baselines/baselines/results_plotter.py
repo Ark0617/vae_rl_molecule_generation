@@ -16,15 +16,18 @@ COLORS = ['blue', 'green', 'red', 'cyan', 'magenta', 'yellow', 'black', 'purple'
         'brown', 'orange', 'teal', 'coral', 'lightblue', 'lime', 'lavender', 'turquoise',
         'darkgreen', 'tan', 'salmon', 'gold', 'lightpurple', 'darkred', 'darkblue']
 
+
 def rolling_window(a, window):
     shape = a.shape[:-1] + (a.shape[-1] - window + 1, window)
     strides = a.strides + (a.strides[-1],)
     return np.lib.stride_tricks.as_strided(a, shape=shape, strides=strides)
 
+
 def window_func(x, y, window, func):
     yw = rolling_window(y, window)
     yw_func = func(yw, axis=-1)
     return x[window-1:], yw_func
+
 
 def ts2xy(ts, xaxis):
     if xaxis == X_TIMESTEPS:
@@ -39,6 +42,7 @@ def ts2xy(ts, xaxis):
     else:
         raise NotImplementedError
     return x, y
+
 
 def plot_curves(xy_list, xaxis, title):
     plt.figure(figsize=(8,2))
@@ -55,6 +59,7 @@ def plot_curves(xy_list, xaxis, title):
     plt.ylabel("Episode Rewards")
     plt.tight_layout()
 
+
 def plot_results(dirs, num_timesteps, xaxis, task_name):
     tslist = []
     for dir in dirs:
@@ -70,6 +75,7 @@ def plot_results(dirs, num_timesteps, xaxis, task_name):
 # log_viewer.plot_results(["./log"], 10e6, log_viewer.X_TIMESTEPS, "Breakout")
 # Here ./log is a directory containing the monitor.csv files
 
+
 def main():
     import argparse
     import os
@@ -82,6 +88,7 @@ def main():
     args.dirs = [os.path.abspath(dir) for dir in args.dirs]
     plot_results(args.dirs, args.num_timesteps, args.xaxis, args.task_name)
     plt.show()
+
 
 if __name__ == '__main__':
     main()

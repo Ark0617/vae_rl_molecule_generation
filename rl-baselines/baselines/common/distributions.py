@@ -132,6 +132,7 @@ class BernoulliPdType(PdType):
 #         u = tf.random_uniform(tf.shape(self.logits))
 #         return U.argmax(self.logits - tf.log(-tf.log(u)), axis=-1)
 
+
 class CategoricalPd(Pd):
     def __init__(self, logits):
         self.logits = logits
