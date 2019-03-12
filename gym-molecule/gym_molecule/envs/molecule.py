@@ -423,8 +423,8 @@ class MoleculeEnv(gym.Env):
                 if not zinc_molecule_filter(final_mol):  # does not contain any problematic functional groups
                     reward_valid -= 1
                     flag_zinc_molecule_filter = False
-                if self.cond_smile:
-                    cond_mol = Chem.RWMol(Chem.MolFromSmiles(self.cond_smile[0]))
+                if self.cond_smile is not None:
+                    cond_mol = Chem.RWMol(Chem.MolFromSmiles(self.cond_smile))
                     Chem.SanitizeMol(cond_mol, sanitizeOps=Chem.SanitizeFlags.SANITIZE_KEKULIZE)
                     cond_mol_fp = Chem.RDKFingerprint(cond_mol)
                     final_mol_fp = Chem.RDKFingerprint(final_mol)
