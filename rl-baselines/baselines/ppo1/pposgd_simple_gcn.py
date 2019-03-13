@@ -249,16 +249,21 @@ def traj_segment_generator(args, pi, env, horizon, stochastic, d_step_func, d_fi
         t += 1
 
 
-def traj_final_generator(pi, env, batch_size, stochastic):
+def traj_final_generator(args, pi, env, batch_size, stochastic):
     ob = env.reset()
     ob_adj = ob['adj']
     ob_node = ob['node']
+    cond_smile = list(env.get_all_smiles())
     ob_adjs = np.array([ob_adj for _ in range(batch_size)])
     ob_nodes = np.array([ob_node for _ in range(batch_size)])
     for i in range(batch_size):
         ob = env.reset()
+        cur_cond_smile = random.sample(cond_smile, 1)[0]
+        cur_cond_mol = Chem.MolFromSmiles(cur_cond_smile)
+        cur_cond_ob = env.mol_to_graph(cur_cond_mol)
+        cur_cond_sample = np.random.randn(1, ob['node'].shape[1], args.emb_size)
         while True:
-            ac, vpred, debug = pi.act(stochastic, ob)
+            ac, vpred, debug = pi.cond_train_act(stochastic, ob, cur_cond_ob, cur_cond_sample)
             ob, rew_env, new, info = env.step(ac)
             np.set_printoptions(precision=2, linewidth=200)
             # print('ac',ac)
@@ -586,7 +591,7 @@ def learn(args,env, policy_fn, *,
                     if args.has_d_final == 1 and i_optim >= optim_epochs//4*3:
                         # update final discriminator
                         ob_expert, _ = env.get_expert(optim_batchsize, is_final=True, curriculum=args.curriculum, level_total=args.curriculum_num, level=level)
-                        seg_final_adj, seg_final_node = traj_final_generator(pi, copy.deepcopy(env), optim_batchsize, True)
+                        seg_final_adj, seg_final_node = traj_final_generator(args, pi, copy.deepcopy(env), optim_batchsize, True)
                         # update final discriminator
                         loss_d_final, g_d_final = lossandgrad_d_final(ob_expert["adj"], ob_expert["node"], seg_final_adj, seg_final_node)
                         # loss_d_final, g_d_final = lossandgrad_d_final(ob_expert["adj"], ob_expert["node"], ob_adjs, ob_nodes)
