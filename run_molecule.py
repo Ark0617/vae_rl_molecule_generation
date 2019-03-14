@@ -84,7 +84,6 @@ def molecule_arg_parser():
     parser.add_argument('--has_d_step', type=int, default=1)
     parser.add_argument('--has_d_final', type=int, default=1)
     parser.add_argument('--has_ppo', type=int, default=1)
-    parser.add_argument('--has_cond', type=int, default=1)
     parser.add_argument('--rl_start', type=int, default=250)
     parser.add_argument('--rl_end', type=int, default=int(1e6))
     parser.add_argument('--expert_start', type=int, default=0)
@@ -119,6 +118,7 @@ def molecule_arg_parser():
     parser.add_argument('--name_full', type=str, default='')
     parser.add_argument('--name_full_load', type=str, default='')
     parser.add_argument('--is_train', type=int, default=1)
+    parser.add_argument('--has_cond', type=int, default=1)
 
     return parser
 

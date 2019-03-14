@@ -191,13 +191,21 @@ class GCNPolicy(object):
         if args.is_train == 1:
             cond_mean, cond_log_std = self.encoder(args, cond_ob)
             # with tf.control_dependencies([cond_mean, cond_log_std]):
-            sample = cond_mean + cond_sample * tf.exp(cond_log_std)
-            sample = tf.squeeze(sample, axis=1)
+            sample = tf.squeeze(cond_sample, axis=1)
+            sample = cond_mean + sample * tf.exp(cond_log_std)
+            sample = tf.expand_dims(sample, axis=1)
+            #sample = tf.squeeze(sample, axis=1)
             #self._cond_mean_logstd = U.function([cond_ob['adj'], cond_ob['node']], [cond_mean, cond_log_std])
         else:
-            sample = tf.squeeze(cond_sample, axis=1)
+            sample = cond_sample
+        concat_emb = tf.concat([cond_ob['node'], sample], axis=-1)
+        fusion_emb = tf.layers.dense(concat_emb, 8, activation=None, use_bias=False, name='fusion_layer')
         self.ac_real = U.get_placeholder(name='ac_real', dtype=tf.int64, shape=[None, 4])  # feed groudtruth action
-        ob_node = tf.layers.dense(ob['node'], 8, activation=None, use_bias=False, name='emb')  # embedding layer
+        if args.has_cond:
+            ob_node = fusion_emb
+            print(ob_node.shape)
+        else:
+            ob_node = tf.layers.dense(ob['node'], 8, activation=None, use_bias=False, name='emb')  # embedding layer
         if args.bn == 1:
             ob_node = tf.layers.batch_normalization(ob_node, axis=-1)
         if args.has_concat == 1:
@@ -217,10 +225,11 @@ class GCNPolicy(object):
                 emb_node = tf.layers.batch_normalization(emb_node, axis=-1)
         emb_node = GCN_batch(ob['adj'], emb_node, args.emb_size, is_act=False, is_normalize=(args.bn == 0), name='gcn2', aggregate=args.gcn_aggregate)
         emb_node = tf.squeeze(emb_node, axis=1)  # B*v*h
-        concat_emb = tf.concat([emb_node, sample], axis=-1)
-        fusion_emb = tf.layers.dense(concat_emb, args.emb_size, activation=None, use_bias=False, name='fusion_layer')
-        #if args.has_cond == 1:
-        emb_node = fusion_emb
+        # concat_emb = tf.concat([emb_node, sample], axis=-1)
+        # fusion_emb = tf.layers.dense(concat_emb, args.emb_size, activation=None, use_bias=False, name='fusion_layer')
+        # #if args.has_cond == 1:
+        # if args.has_cond == 1:
+        #     emb_node = fusion_emb
         ### 1 only keep effective nodes
         # ob_mask = tf.cast(tf.transpose(tf.reduce_sum(ob['node'],axis=-1),[0,2,1]),dtype=tf.bool) # B*n*1
         ob_len = tf.reduce_sum(tf.squeeze(tf.cast(tf.cast(tf.reduce_sum(ob['node'], axis=-1), dtype=tf.bool), dtype=tf.float32), axis=-2), axis=-1)  # B
@@ -241,7 +250,7 @@ class GCNPolicy(object):
         ### 2 predict stop
         emb_stop = tf.layers.dense(emb_node, args.emb_size, activation=tf.nn.relu, use_bias=False, name='linear_stop1')
         if args.bn == 1:
-            emb_stop = tf.layers.batch_normalization(emb_stop,axis=-1)
+            emb_stop = tf.layers.batch_normalization(emb_stop, axis=-1)
         self.logits_stop = tf.reduce_sum(emb_stop, axis=1)
         self.logits_stop = tf.layers.dense(self.logits_stop, 2, activation=None, name='linear_stop2_1')  # B*2
         # explicitly show node num
@@ -399,10 +408,13 @@ class GCNPolicy(object):
                     cond_emb_node = tf.layers.batch_normalization(cond_emb_node, axis=-1)
             cond_emb_node = GCN_batch(cond_ob['adj'], cond_emb_node, args.emb_size, is_act=False,
                                       is_normalize=(args.bn == 0), name='cond_gcn2', aggregate=args.gcn_aggregate)
-            cond_mean = GCN_batch(cond_ob['adj'], cond_emb_node, args.emb_size, is_act=False,
-                                       is_normalize=(args.bn == 0), name='cond_mean', aggregate=args.gcn_aggregate)
-            cond_log_std = GCN_batch(cond_ob['adj'], cond_emb_node, args.emb_size, is_act=False,
-                                          is_normalize=(args.bn == 0), name='cond_logstd', aggregate=args.gcn_aggregate)
+            cond_emb_node = tf.squeeze(cond_emb_node, axis=1)  # b*v*h
+            cond_mean = tf.layers.dense(cond_emb_node, args.emb_size, activation=None, use_bias=False, name='cond_mean_layer')
+            cond_log_std = tf.layers.dense(cond_emb_node, args.emb_size, activation=None, use_bias=False, name='cond_logstd_layer')
+            # cond_mean = GCN_batch(cond_ob['adj'], cond_emb_node, args.emb_size, is_act=False,
+            #                            is_normalize=(args.bn == 0), name='cond_mean', aggregate=args.gcn_aggregate)
+            # cond_log_std = GCN_batch(cond_ob['adj'], cond_emb_node, args.emb_size, is_act=False,
+            #                               is_normalize=(args.bn == 0), name='cond_logstd', aggregate=args.gcn_aggregate)
             return cond_mean, cond_log_std
 
     def act(self, stochastic, ob):
