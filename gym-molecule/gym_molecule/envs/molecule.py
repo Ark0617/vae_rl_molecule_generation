@@ -451,7 +451,7 @@ class MoleculeEnv(gym.Env):
                     elif self.reward_type == 'qedsa':
                         reward_final += (reward_qed*1.5 + reward_sa*0.5)
                     elif self.reward_type == 'qed_target':
-                        # reward_final += reward_target(final_mol,target=self.reward_target,ratio=0.1,val_max=2,val_min=-2,func=qed)
+                        # reward_final += reward_target(final_mol,target=self.reward_target,ratio=0.1,val_max=2, val_min=-2,func=qed)
                         reward_final += reward_target_qed(final_mol, target=self.reward_target)
                     elif self.reward_type == 'mw_target':
                         # reward_final += reward_target(final_mol,target=self.reward_target,ratio=40,val_max=2,val_min=-2,func=rdMolDescriptors.CalcExactMolWt)

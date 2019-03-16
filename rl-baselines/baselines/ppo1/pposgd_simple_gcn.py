@@ -368,7 +368,7 @@ def learn(args,env, policy_fn, *,
     surr2 = tf.clip_by_value(ratio, 1.0 - clip_param, 1.0 + clip_param) * atarg
     pol_surr = - tf.reduce_mean(tf.minimum(surr1, surr2))  # PPO's pessimistic surrogate (L^CLIP)
     vf_loss = tf.reduce_mean(tf.square(pi.vpred - ret))
-    total_loss = pol_surr + pol_entpen + vf_loss  #+ args.kl_ppo_ratio * kl_loss
+    total_loss = pol_surr + pol_entpen + vf_loss #+ args.kl_ppo_ratio * kl_loss
     losses = [pol_surr, pol_entpen, vf_loss, meankl, meanent]
     loss_names = ["pol_surr", "pol_entpen", "vf_loss", "kl", "ent"]
 
@@ -477,7 +477,7 @@ def learn(args,env, policy_fn, *,
     U.initialize()
     if args.load == 1:
         try:
-            fname = './ckpt/' + args.name_full + '_' + args.reward_type + '_' + str(450)  #_load
+            fname = './ckpt/' + args.name_full + '_' + args.reward_type + '_' + str(1800)  #_load
             sess = tf.get_default_session()
             # sess.run(tf.global_variables_initializer())
             saver = tf.train.Saver(var_list_pi)
@@ -563,6 +563,10 @@ def learn(args,env, policy_fn, *,
                 g_kl = 0
 
                 pretrain_shift = 5
+                batch = d.next_batch(optim_batchsize)
+                kl_loss, g_kl = lossandgrad_kl(batch["cond_ob_adj"], batch["cond_ob_node"])
+                kl_loss = np.mean(kl_loss)
+                adam_encoder.update(0.2 * g_kl, optim_stepsize * cur_lrmult)
                 ## Expert
                 if iters_so_far >= args.expert_start and iters_so_far <= args.expert_end + pretrain_shift:
                     ## Expert train
@@ -572,18 +576,19 @@ def learn(args,env, policy_fn, *,
                     # loss_expert_stop = np.mean(loss_expert_stop)
                     ob_expert, ac_expert = env.get_expert(optim_batchsize)
                     sample = np.random.randn(optim_batchsize, 1, ob_expert['node'].shape[1], args.emb_size)
-                    loss_expert, g_expert = lossandgrad_expert(ob_expert['adj'], ob_expert['node'], ob_expert['adj'], ob_expert['node'], sample, ac_expert, ac_expert)
-                    expert_kl_loss, expert_g_kl = lossandgrad_kl(ob_expert['adj'], ob_expert['node'])
+                    loss_expert, g_expert = lossandgrad_expert(ob_expert['adj'], ob_expert['node'], batch["cond_ob_adj"],
+                                                               batch["cond_ob_node"], sample, ac_expert, ac_expert)
+                    #expert_kl_loss, expert_g_kl = lossandgrad_kl(batch["cond_ob_adj"], batch["cond_ob_node"])
                     loss_expert = np.mean(loss_expert)
-                    expert_kl_loss = np.mean(expert_kl_loss)
-                    adam_encoder.update(expert_g_kl, optim_stepsize * cur_lrmult)
+                    #expert_kl_loss = np.mean(expert_kl_loss)
+                    #adam_encoder.update(expert_g_kl, optim_stepsize * cur_lrmult)
                 ## PPO
                 if iters_so_far >= args.rl_start and iters_so_far <= args.rl_end:
                     assign_old_eq_new()  # set old parameter values to new parameter values
-                    batch = d.next_batch(optim_batchsize)
-                    rl_kl_loss, rl_g_kl = lossandgrad_kl(batch["cond_ob_adj"], batch["cond_ob_node"])
-                    rl_kl_loss = np.mean(rl_kl_loss)
-                    adam_encoder.update(rl_g_kl, optim_stepsize * cur_lrmult)
+                    # batch = d.next_batch(optim_batchsize)
+                    #rl_kl_loss, rl_g_kl = lossandgrad_kl(batch["cond_ob_adj"], batch["cond_ob_node"])
+                    #rl_kl_loss = np.mean(rl_kl_loss)
+                    #adam_encoder.update(rl_g_kl, optim_stepsize * cur_lrmult)
                     # ppo
                     # if args.has_ppo==1:
                     if iters_so_far >= args.rl_start+pretrain_shift: # start generator after discriminator trained a well..
@@ -637,7 +642,7 @@ def learn(args,env, policy_fn, *,
             #print(kl_loss)
             if writer is not None:
                 writer.add_scalar("loss_expert", loss_expert, iters_so_far)
-                writer.add_scalar("KL_loss", expert_kl_loss+rl_kl_loss, iters_so_far)
+                writer.add_scalar("KL_loss", kl_loss, iters_so_far)
                 writer.add_scalar("loss_expert_stop", loss_expert_stop, iters_so_far)  # no use
                 writer.add_scalar("loss_d_step", loss_d_step, iters_so_far)
                 writer.add_scalar("loss_d_final", loss_d_final, iters_so_far)
