@@ -477,7 +477,7 @@ def learn(args,env, policy_fn, *,
     U.initialize()
     if args.load == 1:
         try:
-            fname = './ckpt/' + args.name_full + '_' + args.reward_type + '_' + str(1800)  #_load
+            fname = './ckpt/' + args.name_full + '_' + args.reward_type + '_' + str(900)  #_load
             sess = tf.get_default_session()
             # sess.run(tf.global_variables_initializer())
             saver = tf.train.Saver(var_list_pi)
@@ -566,7 +566,7 @@ def learn(args,env, policy_fn, *,
                 batch = d.next_batch(optim_batchsize)
                 kl_loss, g_kl = lossandgrad_kl(batch["cond_ob_adj"], batch["cond_ob_node"])
                 kl_loss = np.mean(kl_loss)
-                adam_encoder.update(0.2 * g_kl, optim_stepsize * cur_lrmult)
+                adam_encoder.update(0.5*g_kl, optim_stepsize * cur_lrmult)
                 ## Expert
                 if iters_so_far >= args.expert_start and iters_so_far <= args.expert_end + pretrain_shift:
                     ## Expert train
@@ -574,10 +574,10 @@ def learn(args,env, policy_fn, *,
                     # ob_expert, ac_expert = env.get_expert(optim_batchsize, is_final=True)
                     # loss_expert_stop, g_expert_stop = lossandgrad_expert_stop(ob_expert['adj'], ob_expert['node'], ac_expert,ac_expert)
                     # loss_expert_stop = np.mean(loss_expert_stop)
-                    ob_expert, ac_expert = env.get_expert(optim_batchsize)
+                    ob_expert, ac_expert, ori_ob_expert = env.get_expert(optim_batchsize)
                     sample = np.random.randn(optim_batchsize, 1, ob_expert['node'].shape[1], args.emb_size)
-                    loss_expert, g_expert = lossandgrad_expert(ob_expert['adj'], ob_expert['node'], batch["cond_ob_adj"],
-                                                               batch["cond_ob_node"], sample, ac_expert, ac_expert)
+                    loss_expert, g_expert = lossandgrad_expert(ob_expert['adj'], ob_expert['node'], ori_ob_expert['adj'],
+                                                               ori_ob_expert['node'], sample, ac_expert, ac_expert)
                     #expert_kl_loss, expert_g_kl = lossandgrad_kl(batch["cond_ob_adj"], batch["cond_ob_node"])
                     loss_expert = np.mean(loss_expert)
                     #expert_kl_loss = np.mean(expert_kl_loss)
@@ -597,14 +597,14 @@ def learn(args,env, policy_fn, *,
 
                     if args.has_d_step == 1 and i_optim >= optim_epochs//2:
                         # update step discriminator
-                        ob_expert, _ = env.get_expert(optim_batchsize, curriculum=args.curriculum, level_total=args.curriculum_num, level=level)
+                        ob_expert, _, _ = env.get_expert(optim_batchsize, curriculum=args.curriculum, level_total=args.curriculum_num, level=level)
                         loss_d_step, g_d_step = lossandgrad_d_step(ob_expert["adj"], ob_expert["node"], batch["ob_adj"], batch["ob_node"])
                         adam_d_step.update(g_d_step, optim_stepsize * cur_lrmult)
                         loss_d_step = np.mean(loss_d_step)
 
                     if args.has_d_final == 1 and i_optim >= optim_epochs//4*3:
                         # update final discriminator
-                        ob_expert, _ = env.get_expert(optim_batchsize, is_final=True, curriculum=args.curriculum, level_total=args.curriculum_num, level=level)
+                        ob_expert, _, _ = env.get_expert(optim_batchsize, is_final=True, curriculum=args.curriculum, level_total=args.curriculum_num, level=level)
                         seg_final_adj, seg_final_node = traj_final_generator(args, pi, copy.deepcopy(env), optim_batchsize, True)
                         # update final discriminator
                         loss_d_final, g_d_final = lossandgrad_d_final(ob_expert["adj"], ob_expert["node"], seg_final_adj, seg_final_node)
@@ -620,7 +620,7 @@ def learn(args,env, policy_fn, *,
                 #     adam_pi.update(g_ppo, optim_stepsize * cur_lrmult)
                 # else:
                 #adam_encoder.update(rl_g_kl + expert_g_kl, optim_stepsize * cur_lrmult)
-                adam_pi.update(0.2*g_ppo+0.05*g_expert, optim_stepsize * cur_lrmult)
+                adam_pi.update(g_ppo+0.5*g_expert, optim_stepsize * cur_lrmult)
 
             # WGAN
             # if args.has_d_step == 1:

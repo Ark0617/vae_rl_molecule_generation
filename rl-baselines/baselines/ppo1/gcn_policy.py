@@ -198,8 +198,8 @@ class GCNPolicy(object):
             #self._cond_mean_logstd = U.function([cond_ob['adj'], cond_ob['node']], [cond_mean, cond_log_std])
         else:
             sample = cond_sample
-        emb_sample = tf.layers.dense(sample, 1, activation=None, use_bias=False, name='emb_sample_layer')
-        concat_emb = tf.concat([ob['node'], emb_sample], axis=-1)
+        emb_sample = tf.layers.dense(sample, 1, activation=None, use_bias=False, name='emb_sample_layer')  # tf.reduce_mean(sample, axis=-1, keepdims=True)
+        concat_emb = tf.concat([ob['node'], emb_sample], axis=-1)  # b*1*n*d
         fusion_emb = tf.layers.dense(concat_emb, 8, activation=None, use_bias=False, name='fusion_layer')
         self.ac_real = U.get_placeholder(name='ac_real', dtype=tf.int64, shape=[None, 4])  # feed groudtruth action
         if args.has_cond:

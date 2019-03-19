@@ -773,14 +773,15 @@ class MoleculeEnv(gym.Env):
             ob['adj'][idx]=ob_temp['adj']
         return ob
 
-
     def get_expert(self, batch_size, is_final=False, curriculum=0, level_total=6, level=0):
         ob = {}
+        ori_ob = {}
         atom_type_num = len(self.possible_atom_types)
         bond_type_num = len(self.possible_bond_types)
         ob['node'] = np.zeros((batch_size, 1, self.max_atom, self.d_n))
         ob['adj'] = np.zeros((batch_size, bond_type_num, self.max_atom, self.max_atom))
-
+        ori_ob['node'] = np.zeros((batch_size, 1, self.max_atom, self.d_n))
+        ori_ob['adj'] = np.zeros((batch_size, bond_type_num, self.max_atom, self.max_atom))
         ac = np.zeros((batch_size, 4))
         ### select molecule
         dataset_len = len(self.dataset)
@@ -788,18 +789,21 @@ class MoleculeEnv(gym.Env):
             is_final_temp = is_final
             # print('--------------------------------------------------')
             ### get a subgraph
-            if curriculum==1:
+            if curriculum == 1:
                 ratio_start = level/float(level_total)
                 ratio_end = (level+1)/float(level_total)
                 idx = np.random.randint(int(ratio_start*dataset_len), int(ratio_end*dataset_len))
             else:
                 idx = np.random.randint(0, dataset_len)
-            mol = self.dataset[idx]
+            ori_mol = self.dataset[idx]
             # print('ob_before',Chem.MolToSmiles(mol, isomericSmiles=True))
             # from rdkit.Chem import Draw
             # Draw.MolToFile(mol, 'ob_before'+str(i)+'.png')
             # mol = self.dataset[i] # sanitity check
-            Chem.SanitizeMol(mol, sanitizeOps=Chem.SanitizeFlags.SANITIZE_KEKULIZE)
+            Chem.SanitizeMol(ori_mol, sanitizeOps=Chem.SanitizeFlags.SANITIZE_KEKULIZE)
+            mol = copy.deepcopy(ori_mol)
+            ori_ob['node'][i] = self.mol_to_graph(ori_mol)['node']
+            ori_ob['adj'][i] = self.mol_to_graph(ori_mol)['adj']
             graph = mol_to_nx(mol)
             edges = graph.edges()
             # # always involve is_final probability
@@ -847,7 +851,7 @@ class MoleculeEnv(gym.Env):
                 else:
                     print('Expert policy error!')
                 edge_type = np.argmax(graph[edge_sample[0]][edge_sample[1]]['bond_type'] == self.possible_bond_types)
-                ac[i, :] = [node1, node2, edge_type, 0] # don't stop
+                ac[i, :] = [node1, node2, edge_type, 0]  # don't stop
                 # print('action',[node1,node2,edge_type,0])
             # print('action',ac)
             # plt.axis("off")
@@ -895,7 +899,7 @@ class MoleculeEnv(gym.Env):
             auxiliary_atom_features = np.zeros((atom_type_num, self.d_n))  # for padding
             temp = np.eye(atom_type_num)
             auxiliary_atom_features[:temp.shape[0], :temp.shape[1]] = temp
-            ob['node'][i ,0, n:n + atom_type_num, :] = auxiliary_atom_features
+            ob['node'][i, 0, n:n + atom_type_num, :] = auxiliary_atom_features
 
             for j in range(bond_type_num):
                 ob['adj'][i, j, :n + atom_type_num, :n + atom_type_num] = np.eye(n + atom_type_num)
@@ -915,7 +919,7 @@ class MoleculeEnv(gym.Env):
             # from rdkit.Chem import Draw
             # Draw.MolToFile(rw_mol, 'ob' + str(i) + '.png')
 
-        return ob, ac
+        return ob, ac, ori_ob
 
 
 
