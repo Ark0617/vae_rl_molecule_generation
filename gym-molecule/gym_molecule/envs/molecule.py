@@ -174,6 +174,7 @@ class MoleculeEnv(gym.Env):
                 self.max_atom = 38 + len(possible_atoms)  # ZINC  + self.min_action
         elif data_type == 'qm9':
             self.max_atom = 13 + len(possible_atoms)
+            self.min_action = 5
         self.logp_ratio = logp_ratio
         self.qed_ratio = qed_ratio
         self.sa_ratio = sa_ratio
@@ -698,6 +699,9 @@ class MoleculeEnv(gym.Env):
         auxiliary_atom_features = np.zeros((n_shift, self.d_n))  # for padding
         temp = np.eye(n_shift)
         auxiliary_atom_features[:temp.shape[0], :temp.shape[1]] = temp
+        print(n)
+        print(n_shift)
+        print(n+n_shift)
         F[0, n:n+n_shift, :] = auxiliary_atom_features
         # print('n',n,'n+n_shift',n+n_shift,auxiliary_atom_features.shape)
 
