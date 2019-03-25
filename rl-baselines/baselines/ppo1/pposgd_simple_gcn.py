@@ -16,6 +16,7 @@ import pickle
 import sys
 from rdkit import Chem, DataStructs
 
+
 def save_as_pickled_object(obj, filepath):
     """
     This is a defensive way to write pickle.write, allowing for very large files on all platforms
@@ -477,7 +478,7 @@ def learn(args,env, policy_fn, *,
     U.initialize()
     if args.load == 1:
         try:
-            fname = './ckpt/' + args.name_full + '_' + args.reward_type + '_' + str(900)  #_load
+            fname = './ckpt/' + args.name_full + '_' + args.reward_type + '_' + str(800)  # load
             sess = tf.get_default_session()
             # sess.run(tf.global_variables_initializer())
             saver = tf.train.Saver(var_list_pi)
@@ -566,7 +567,7 @@ def learn(args,env, policy_fn, *,
                 batch = d.next_batch(optim_batchsize)
                 kl_loss, g_kl = lossandgrad_kl(batch["cond_ob_adj"], batch["cond_ob_node"])
                 kl_loss = np.mean(kl_loss)
-                adam_encoder.update(0.5*g_kl, optim_stepsize * cur_lrmult)
+                adam_encoder.update(g_kl, optim_stepsize * cur_lrmult)
                 ## Expert
                 if iters_so_far >= args.expert_start and iters_so_far <= args.expert_end + pretrain_shift:
                     ## Expert train
@@ -620,7 +621,7 @@ def learn(args,env, policy_fn, *,
                 #     adam_pi.update(g_ppo, optim_stepsize * cur_lrmult)
                 # else:
                 #adam_encoder.update(rl_g_kl + expert_g_kl, optim_stepsize * cur_lrmult)
-                adam_pi.update(g_ppo+0.5*g_expert, optim_stepsize * cur_lrmult)
+                adam_pi.update(0.2*g_ppo+0.05*g_expert, optim_stepsize * cur_lrmult)
 
             # WGAN
             # if args.has_d_step == 1:
@@ -709,7 +710,7 @@ def learn(args,env, policy_fn, *,
                     f.write('***** Iteration {} *****\n'.format(iters_so_far))
                 # save
                 if iters_so_far % args.save_every == 0:
-                    fname = './ckpt/' + args.name_full + '_' + args.reward_type + '_' + str(iters_so_far)
+                    fname = './ckpt/' + args.name_full + '_' + args.reward_type + '_'+str(args.has_cond)+'_' + str(args.rl_start)+'_'+str(args.recons_ratio)+'_'+str(args.qed_ratio)+'_'+str(iters_so_far)
                     saver = tf.train.Saver(var_list_pi)
                     saver.save(tf.get_default_session(), fname)
                     print('model saved!', fname)
