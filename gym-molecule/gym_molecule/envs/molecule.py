@@ -504,7 +504,6 @@ class MoleculeEnv(gym.Env):
 
         return ob, reward, new, info
 
-
     def reset(self,smile=None):
         '''
         to avoid error, assume an atom already exists
@@ -525,6 +524,14 @@ class MoleculeEnv(gym.Env):
         self.counter = 0
         ob = self.get_observation()
         return ob
+
+    # def set(self, node_with_label):
+    #     self.mol = Chem.RWMol()
+    #     for i in range(len(node_with_label)):
+    #         self._add_atom(node_with_label[i][-1])
+    #     self.counter = 0
+    #     ob = self.get_observation()
+    #     return ob
 
     def render(self, mode='human', close=False):
         return

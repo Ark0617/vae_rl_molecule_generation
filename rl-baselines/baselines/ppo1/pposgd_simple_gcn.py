@@ -51,21 +51,6 @@ def traj_segment_generator(args, pi, env, horizon, stochastic, d_step_func, d_fi
     ac = env.action_space.sample()  # not used, just so we have the datatype
     new = True  # marks if we're on first timestep of an episode
     ob = env.reset()
-    # if args.dataset == 'zinc' and not os.path.exists('/Users/arkshi/Github/rl_graph_generation/gym-molecule/gym_molecule/dataset/mol_zinc_data.pkl'):
-    #     cond_mol = env.get_all_graphs()
-    #     print("Done extract zinc graphs")
-    #     save_as_pickled_object(cond_mol, '/Users/arkshi/Github/rl_graph_generation/gym-molecule/gym_molecule/dataset/mol_zinc_data.pkl')
-    #
-    # elif args.dataset == 'zinc' and os.path.exists('/Users/arkshi/Github/rl_graph_generation/gym-molecule/gym_molecule/dataset/mol_zinc_data.pkl'):
-    #     cond_mol = try_to_load_as_pickled_object_or_None('/Users/arkshi/Github/rl_graph_generation/gym-molecule/gym_molecule/dataset/mol_zinc_data.pkl')
-    # elif args.dataset == 'qm9' and not os.path.exists('/Users/arkshi/Github/rl_graph_generation/gym-molecule/gym_molecule/dataset/mol_qm9_data.pkl'):
-    #     cond_mol = env.get_all_graphs()
-    #     print("Done extract qm9 graphs")
-    #     save_as_pickled_object(cond_mol,
-    #                            '/Users/arkshi/Github/rl_graph_generation/gym-molecule/gym_molecule/dataset/mol_qm9_data.pkl')
-    # elif args.dataset == 'qm9' and os.path.exists('/Users/arkshi/Github/rl_graph_generation/gym-molecule/gym_molecule/dataset/mol_qm9_data.pkl'):
-    #     cond_mol = try_to_load_as_pickled_object_or_None(
-    #         '/Users/arkshi/Github/rl_graph_generation/gym-molecule/gym_molecule/dataset/graph_qm9_data.pkl')
     cond_smile = list(env.get_all_smiles())
     ob_adj = ob['adj']
     ob_node = ob['node']
@@ -75,7 +60,7 @@ def traj_segment_generator(args, pi, env, horizon, stochastic, d_step_func, d_fi
     cur_cond_ob = env.mol_to_graph(cur_cond_mol)
     cond_ob_adj = cur_cond_ob['adj']
     cond_ob_node = cur_cond_ob['node']
-    cur_cond_sample = np.random.randn(1, ob['node'].shape[1], args.emb_size)#tf.random_normal([ob['node'].shape[0], 1, ob['node'].shape[2], args.emb_size])
+    cur_cond_sample = np.random.randn(1, ob['node'].shape[1], ob['node'].shape[2])#tf.random_normal([ob['node'].shape[0], 1, ob['node'].shape[2], args.emb_size])
     cur_ep_ret = 0  # return in current episode
     cur_ep_ret_env = 0
     cur_ep_ret_d_step = 0
@@ -244,7 +229,7 @@ def traj_segment_generator(args, pi, env, horizon, stochastic, d_step_func, d_fi
             env.update_cond_smile(cur_cond_smile)
             cur_cond_mol = Chem.MolFromSmiles(cur_cond_smile)
             cur_cond_ob = env.mol_to_graph(cur_cond_mol)
-            cur_cond_sample = np.random.randn(1, ob['node'].shape[1], args.emb_size)
+            cur_cond_sample = np.random.randn(1, ob['node'].shape[1], ob['node'].shape[2])
             ob = env.reset()
 
         t += 1
@@ -262,7 +247,7 @@ def traj_final_generator(args, pi, env, batch_size, stochastic):
         cur_cond_smile = random.sample(cond_smile, 1)[0]
         cur_cond_mol = Chem.MolFromSmiles(cur_cond_smile)
         cur_cond_ob = env.mol_to_graph(cur_cond_mol)
-        cur_cond_sample = np.random.randn(1, ob['node'].shape[1], args.emb_size)
+        cur_cond_sample = np.random.randn(1, ob['node'].shape[1], ob['node'].shape[2])
         while True:
             ac, vpred, debug = pi.cond_train_act(stochastic, ob, cur_cond_ob, cur_cond_sample)
             ob, rew_env, new, info = env.step(ac)
@@ -326,7 +311,7 @@ def learn(args,env, policy_fn, *,
     cond_ob['node'] = U.get_placeholder(shape=[None, 1, None, ob_space['node'].shape[2]], dtype=tf.float32, name='cond_node')
     #cond_ob['ori_adj'] = tf.placeholder(shape=[None, ob_space['adj'].shape[0], None, None], dtype=tf.float32, name='cond_adj')
 
-    cond_sample = U.get_placeholder(dtype=tf.float32, shape=[None, 1, None, args.emb_size], name='normal_cond_sample')
+    cond_sample = U.get_placeholder(dtype=tf.float32, shape=[None, 1, None, ob_space['node'].shape[2]], name='normal_cond_sample')
     # cond_mean = tf.placeholder(shape=[None, 1, None, args.emb_size], name='cond_mean', dtype=tf.float32)
     # cond_logstd = tf.placeholder(shape=[None, 1, None, args.emb_size], name='cond_logstd', dtype=tf.float32)
 
@@ -576,7 +561,8 @@ def learn(args,env, policy_fn, *,
                     # loss_expert_stop, g_expert_stop = lossandgrad_expert_stop(ob_expert['adj'], ob_expert['node'], ac_expert,ac_expert)
                     # loss_expert_stop = np.mean(loss_expert_stop)
                     ob_expert, ac_expert, ori_ob_expert = env.get_expert(optim_batchsize)
-                    sample = np.random.randn(optim_batchsize, 1, ob_expert['node'].shape[1], args.emb_size)
+                    sample = np.random.randn(optim_batchsize, 1, ob_expert['node'].shape[2], ob_expert['node'].shape[3])
+                    #print(sample.shape)
                     loss_expert, g_expert = lossandgrad_expert(ob_expert['adj'], ob_expert['node'], ori_ob_expert['adj'],
                                                                ori_ob_expert['node'], sample, ac_expert, ac_expert)
                     #expert_kl_loss, expert_g_kl = lossandgrad_kl(batch["cond_ob_adj"], batch["cond_ob_node"])

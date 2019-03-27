@@ -63,6 +63,14 @@ def GCN_batch(adj, node_feature, out_channels, is_act=True, is_normalize=False, 
             node_embedding = tf.nn.l2_normalize(node_embedding, axis=-1)
         return node_embedding
 
+
+# def node_label_layer(node_emb, out_channels):
+#     with tf.variable_scope('node_labeling', reuse=tf.AUTO_REUSE):
+#             node_logits = tf.layers.dense(node_emb, out_channels, activation=tf.nn.relu, use_bias=False, name='node_label_layer')
+#             pd_node_label = CategoricalPdType(-1).pdfromflat(flat=node_logits)
+#             node_label = pd_node_label.sample()
+#             one_hot_node_label = tf.one_hot(node_label, out_channels)
+#     return one_hot_node_label
 # # gcn mean aggregation over edge features, multi hop version
 # def GCN_multihop_batch(adj, node_feature, out_channels, hops, is_act=True, is_normalize=False, name='gcn_simple',aggregate='mean'):
 #     '''
@@ -186,21 +194,32 @@ class GCNPolicy(object):
         cond_ob['node'] = U.get_placeholder(name='cond_node', dtype=tf.float32,
                                             shape=[None, 1, None, ob_space['node'].shape[2]])
         cond_sample = U.get_placeholder(name='normal_cond_sample', dtype=tf.float32,
-                                        shape=[None, 1, None, args.emb_size])
+                                        shape=[None, 1, None, ob_space['node'].shape[2]])
         #if args.has_cond == 1:
         if args.is_train == 1:
             cond_mean, cond_log_std = self.encoder(args, cond_ob)
             # with tf.control_dependencies([cond_mean, cond_log_std]):
-            #sample = tf.squeeze(cond_sample, axis=1)
-            sample = cond_mean + cond_sample * tf.exp(cond_log_std)
-            #sample = tf.expand_dims(sample, axis=1)
-            #sample = tf.squeeze(sample, axis=1)
-            #self._cond_mean_logstd = U.function([cond_ob['adj'], cond_ob['node']], [cond_mean, cond_log_std])
+            # sample = tf.squeeze(cond_sample, axis=1)
+            sample = cond_mean + cond_sample * tf.exp(cond_log_std)  # b*1*n*h
+            # sample = tf.expand_dims(sample, axis=1)
+            # sample = tf.squeeze(sample, axis=1)
+            # self._cond_mean_logstd = U.function([cond_ob['adj'], cond_ob['node']], [cond_mean, cond_log_std])
         else:
             sample = cond_sample
-        emb_sample = tf.layers.dense(sample, 1, activation=None, use_bias=False, name='emb_sample_layer')  # tf.reduce_mean(sample, axis=-1, keepdims=True)
-        concat_emb = tf.concat([ob['node'], emb_sample], axis=-1)  # b*1*n*d
-        fusion_emb = tf.layers.dense(concat_emb, 8, activation=None, use_bias=False, name='fusion_layer')
+        # if args.dataset=='zinc':
+        #     node_labels = node_label_layer(sample, 9)
+        # else:
+        #     node_labels = node_label_layer(sample, 5)
+        # sample_with_labels = tf.concat([sample, node_labels], axis=-1)
+        sample_emb_graph = tf.reduce_sum(sample, axis=2, keepdims=True)
+        #print(sample_emb_graph.shape)
+        #emb_sample = tf.layers.dense(sample, 1, activation=None, use_bias=False, name='emb_sample_layer')  # tf.reduce_mean(sample, axis=-1, keepdims=True)
+        diag_sample_graph = tf.linalg.diag(sample_emb_graph)
+        diag_sample_graph = tf.squeeze(diag_sample_graph, axis=1)
+        #print(diag_sample_graph.shape)
+        weighted_ob_node = ob['node'] @ diag_sample_graph  #b*1*n*9
+        #concat_emb = tf.concat([ob['node'], emb_sample], axis=-1)  # b*1*n*d
+        fusion_emb = tf.layers.dense(weighted_ob_node, 8, activation=None, use_bias=False, name='fusion_layer')
         self.ac_real = U.get_placeholder(name='ac_real', dtype=tf.int64, shape=[None, 4])  # feed groudtruth action
         if args.has_cond:
             ob_node = fusion_emb
@@ -386,35 +405,35 @@ class GCNPolicy(object):
             if args.bn == 1:
                 cond_ob_node = tf.layers.batch_normalization(cond_ob_node, axis=-1)
             if args.has_concat == 1:
-                cond_emb_node = tf.concat(GCN_batch(cond_ob['adj'], cond_ob_node, args.emb_size, name='cond_gcn1',
+                cond_emb_node = tf.concat(GCN_batch(cond_ob['adj'], cond_ob_node, cond_ob['node'].shape[-1], name='cond_gcn1',
                                                     aggregate=args.gcn_aggregate), cond_ob_node, axis=-1)
             else:
-                cond_emb_node = GCN_batch(cond_ob['adj'], cond_ob_node, args.emb_size, name='cond_gcn1',
+                cond_emb_node = GCN_batch(cond_ob['adj'], cond_ob_node, cond_ob['node'].shape[-1], name='cond_gcn1',
                                           aggregate=args.gcn_aggregate)
             if args.bn == 1:
                 cond_emb_node = tf.layers.batch_normalization(cond_ob_node, axis=-1)
             for i in range(args.layer_num_cond - 2):
                 if args.has_residual == 1:
-                    cond_emb_node = GCN_batch(cond_ob['adj'], cond_emb_node, args.emb_size,
+                    cond_emb_node = GCN_batch(cond_ob['adj'], cond_emb_node, cond_ob['node'].shape[-1],
                                               name='cond_gcn1_' + str(i + 1),
                                               aggregate=args.gcn_aggregate) + self.emb_node1
                 elif args.has_concat == 1:
                     cond_emb_node = tf.concat(
-                        GCN_batch(cond_ob['adj'], cond_emb_node, args.emb_size, name='cond_gcn1_' + str(i + 1),
+                        GCN_batch(cond_ob['adj'], cond_emb_node, cond_ob['node'].shape[-1], name='cond_gcn1_' + str(i + 1),
                                   aggregate=args.gcn_aggregate), self.emb_node1, axis=-1)
                 else:
-                    cond_emb_node = GCN_batch(cond_ob['adj'], cond_emb_node, args.emb_size,
+                    cond_emb_node = GCN_batch(cond_ob['adj'], cond_emb_node, cond_ob['node'].shape[-1],
                                               name='cond_gcn1_' + str(i + 1), aggregate=args.gcn_aggregate)
                 if args.bn == 1:
                     cond_emb_node = tf.layers.batch_normalization(cond_emb_node, axis=-1)
-            cond_emb_node = GCN_batch(cond_ob['adj'], cond_emb_node, args.emb_size, is_act=False,
+            cond_emb_node = GCN_batch(cond_ob['adj'], cond_emb_node, cond_ob['node'].shape[-1], is_act=False,
                                       is_normalize=(args.bn == 0), name='cond_gcn2', aggregate=args.gcn_aggregate)
             # cond_emb_node = tf.squeeze(cond_emb_node, axis=1)  # b*v*h
             # cond_mean = tf.layers.dense(cond_emb_node, args.emb_size, activation=None, use_bias=False, name='cond_mean_layer')
             # cond_log_std = tf.layers.dense(cond_emb_node, args.emb_size, activation=None, use_bias=False, name='cond_logstd_layer')
-            cond_mean = GCN_batch(cond_ob['adj'], cond_emb_node, args.emb_size, is_act=False,
+            cond_mean = GCN_batch(cond_ob['adj'], cond_emb_node, cond_ob['node'].shape[-1], is_act=False,
                                        is_normalize=(args.bn == 0), name='cond_mean', aggregate=args.gcn_aggregate)
-            cond_log_std = GCN_batch(cond_ob['adj'], cond_emb_node, args.emb_size, is_act=False,
+            cond_log_std = GCN_batch(cond_ob['adj'], cond_emb_node, cond_ob['node'].shape[-1], is_act=False,
                                           is_normalize=(args.bn == 0), name='cond_logstd', aggregate=args.gcn_aggregate)
             return cond_mean, cond_log_std
 
