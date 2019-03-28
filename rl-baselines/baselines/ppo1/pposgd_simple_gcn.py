@@ -354,12 +354,12 @@ def learn(args,env, policy_fn, *,
     surr2 = tf.clip_by_value(ratio, 1.0 - clip_param, 1.0 + clip_param) * atarg
     pol_surr = - tf.reduce_mean(tf.minimum(surr1, surr2))  # PPO's pessimistic surrogate (L^CLIP)
     vf_loss = tf.reduce_mean(tf.square(pi.vpred - ret))
-    total_loss = pol_surr + pol_entpen + vf_loss #+ args.kl_ppo_ratio * kl_loss
+    total_loss = pol_surr + pol_entpen + vf_loss#+ args.kl_ppo_ratio * kl_loss
     losses = [pol_surr, pol_entpen, vf_loss, meankl, meanent]
     loss_names = ["pol_surr", "pol_entpen", "vf_loss", "kl", "ent"]
 
     ## Expert loss
-    loss_expert = -tf.reduce_mean(pi_logp) #+ args.kl_expert_ratio * kl_loss
+    loss_expert = -tf.reduce_mean(pi_logp)#+ args.kl_expert_ratio * kl_loss
 
 
     ## Discriminator loss
@@ -412,10 +412,10 @@ def learn(args,env, policy_fn, *,
 
 
     ## loss update function
-    lossandgrad_ppo = U.function([ob['adj'], ob['node'], cond_ob['adj'], cond_ob['node'], cond_sample, ac, pi.ac_real, oldpi.ac_real, atarg, ret, lrmult], losses + [U.flatgrad(total_loss, var_list_pi)])
-    lossandgrad_expert = U.function([ob['adj'], ob['node'], cond_ob['adj'], cond_ob['node'], cond_sample, ac, pi.ac_real], [loss_expert, U.flatgrad(loss_expert, var_list_pi)])
+    lossandgrad_ppo = U.function([ob['adj'], ob['node'], cond_ob['adj'], cond_ob['node'], cond_sample, ac, pi.ac_real, oldpi.ac_real, atarg, ret, lrmult], losses + [kl_loss, U.flatgrad(total_loss+kl_loss, var_list_pi)])
+    lossandgrad_expert = U.function([ob['adj'], ob['node'], cond_ob['adj'], cond_ob['node'], cond_sample, ac, pi.ac_real], [loss_expert, kl_loss, U.flatgrad(loss_expert+kl_loss, var_list_pi)])
     lossandgrad_expert_stop = U.function([ob['adj'], ob['node'], cond_ob['adj'], cond_ob['node'], cond_sample, ac, pi.ac_real], [loss_expert, U.flatgrad(loss_expert, var_list_pi_stop)])
-    lossandgrad_kl = U.function([cond_ob['adj'], cond_ob['node']], [kl_loss, U.flatgrad(kl_loss, var_list_encoder)])
+    #lossandgrad_kl = U.function([cond_ob['adj'], cond_ob['node']], [kl_loss, U.flatgrad(kl_loss, var_list_encoder)])
     lossandgrad_d_step = U.function([ob_real['adj'], ob_real['node'], ob_gen['adj'], ob_gen['node']], [loss_d_step, U.flatgrad(loss_d_step, var_list_d_step)])
     lossandgrad_d_final = U.function([ob_real['adj'], ob_real['node'], ob_gen['adj'], ob_gen['node']], [loss_d_final, U.flatgrad(loss_d_final, var_list_d_final)])
     loss_g_gen_step_func = U.function([ob_gen['adj'], ob_gen['node'], cond_ob['adj'], cond_ob['node']], loss_g_step_gen)
@@ -550,9 +550,9 @@ def learn(args,env, policy_fn, *,
 
                 pretrain_shift = 5
                 batch = d.next_batch(optim_batchsize)
-                kl_loss, g_kl = lossandgrad_kl(batch["cond_ob_adj"], batch["cond_ob_node"])
-                kl_loss = np.mean(kl_loss)
-                adam_encoder.update(g_kl, optim_stepsize * cur_lrmult)
+                # kl_loss, g_kl = lossandgrad_kl(batch["cond_ob_adj"], batch["cond_ob_node"])
+                # kl_loss = np.mean(kl_loss)
+                # adam_encoder.update(g_kl, optim_stepsize * cur_lrmult)
                 ## Expert
                 if iters_so_far >= args.expert_start and iters_so_far <= args.expert_end + pretrain_shift:
                     ## Expert train
@@ -563,7 +563,7 @@ def learn(args,env, policy_fn, *,
                     ob_expert, ac_expert, ori_ob_expert = env.get_expert(optim_batchsize)
                     sample = np.random.randn(optim_batchsize, 1, ob_expert['node'].shape[2], ob_expert['node'].shape[3])
                     #print(sample.shape)
-                    loss_expert, g_expert = lossandgrad_expert(ob_expert['adj'], ob_expert['node'], ori_ob_expert['adj'],
+                    loss_expert, kl_loss, g_expert = lossandgrad_expert(ob_expert['adj'], ob_expert['node'], ori_ob_expert['adj'],
                                                                ori_ob_expert['node'], sample, ac_expert, ac_expert)
                     #expert_kl_loss, expert_g_kl = lossandgrad_kl(batch["cond_ob_adj"], batch["cond_ob_node"])
                     loss_expert = np.mean(loss_expert)
@@ -579,7 +579,7 @@ def learn(args,env, policy_fn, *,
                     # ppo
                     # if args.has_ppo==1:
                     if iters_so_far >= args.rl_start+pretrain_shift: # start generator after discriminator trained a well..
-                        *newlosses, g_ppo = lossandgrad_ppo(batch["ob_adj"], batch["ob_node"], batch["cond_ob_adj"], batch["cond_ob_node"], batch["normal_cond_sample"], batch["ac"], batch["ac"], batch["ac"], batch["atarg"], batch["vtarg"], cur_lrmult)
+                        *newlosses, kl_loss, g_ppo = lossandgrad_ppo(batch["ob_adj"], batch["ob_node"], batch["cond_ob_adj"], batch["cond_ob_node"], batch["normal_cond_sample"], batch["ac"], batch["ac"], batch["ac"], batch["atarg"], batch["vtarg"], cur_lrmult)
                         losses_ppo = newlosses
 
                     if args.has_d_step == 1 and i_optim >= optim_epochs//2:
@@ -599,7 +599,7 @@ def learn(args,env, policy_fn, *,
                         adam_d_final.update(g_d_final, optim_stepsize * cur_lrmult)
                         # print(seg["ob_adj_final"].shape)
                         # logger.log(fmt_row(13, np.mean(losses, axis=0)))
-
+                kl_loss = np.mean(kl_loss)
                 # update generator
                 # adam_pi_stop.update(0.1*g_expert_stop, optim_stepsize * cur_lrmult)
 
