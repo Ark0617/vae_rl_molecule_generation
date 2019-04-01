@@ -32,7 +32,7 @@ def train(args, seed, writer=None):
     print(env.observation_space)
 
     def policy_fn(name, ob_space, ac_space):
-        return gcn_policy.GCNPolicy(name=name, ob_space=ob_space, ac_space=ac_space, atom_type_num=env.atom_type_num, args=args)
+        return gcn_policy.GCNPolicy(name=name, ob_space=ob_space, ac_space=ac_space, atom_type_num=env.atom_type_num, char_type_num=len(env.smile_chars), args=args)
     env.seed(workerseed)
 
     pposgd_simple_gcn.learn(args, env, policy_fn,
@@ -119,7 +119,10 @@ def molecule_arg_parser():
     parser.add_argument('--name_full_load', type=str, default='')
     parser.add_argument('--is_train', type=int, default=1)
     parser.add_argument('--has_cond', type=int, default=1)
-
+    parser.add_argument('--smi_max_length', type=int, default=120)
+    parser.add_argument('--enc_conv_layer_num', type=int, default=3)
+    parser.add_argument('--enc_mid_layer_num', type=int, default=3)
+    parser.add_argument('--padding', type=str, default='right')  # left, right, none
     return parser
 
 

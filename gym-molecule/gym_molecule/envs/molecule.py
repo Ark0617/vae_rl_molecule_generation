@@ -525,13 +525,6 @@ class MoleculeEnv(gym.Env):
         ob = self.get_observation()
         return ob
 
-    # def set(self, node_with_label):
-    #     self.mol = Chem.RWMol()
-    #     for i in range(len(node_with_label)):
-    #         self._add_atom(node_with_label[i][-1])
-    #     self.counter = 0
-    #     ob = self.get_observation()
-    #     return ob
 
     def render(self, mode='human', close=False):
         return
@@ -788,8 +781,7 @@ class MoleculeEnv(gym.Env):
         bond_type_num = len(self.possible_bond_types)
         ob['node'] = np.zeros((batch_size, 1, self.max_atom, self.d_n))
         ob['adj'] = np.zeros((batch_size, bond_type_num, self.max_atom, self.max_atom))
-        ori_ob['node'] = np.zeros((batch_size, 1, self.max_atom, self.d_n))
-        ori_ob['adj'] = np.zeros((batch_size, bond_type_num, self.max_atom, self.max_atom))
+        ori_smi = []
         ac = np.zeros((batch_size, 4))
         ### select molecule
         dataset_len = len(self.dataset)
@@ -803,15 +795,16 @@ class MoleculeEnv(gym.Env):
                 idx = np.random.randint(int(ratio_start*dataset_len), int(ratio_end*dataset_len))
             else:
                 idx = np.random.randint(0, dataset_len)
-            ori_mol = self.dataset[idx]
+            mol = self.dataset[idx]
+            Chem.SanitizeMol(mol, sanitizeOps=Chem.SanitizeFlags.SANITIZE_KEKULIZE)
+            ori_smi.append(Chem.MolToSmiles(mol, isomericSmiles=True))
             # print('ob_before',Chem.MolToSmiles(mol, isomericSmiles=True))
             # from rdkit.Chem import Draw
             # Draw.MolToFile(mol, 'ob_before'+str(i)+'.png')
             # mol = self.dataset[i] # sanitity check
-            Chem.SanitizeMol(ori_mol, sanitizeOps=Chem.SanitizeFlags.SANITIZE_KEKULIZE)
-            mol = copy.deepcopy(ori_mol)
-            ori_ob['node'][i] = self.mol_to_graph(ori_mol)['node']
-            ori_ob['adj'][i] = self.mol_to_graph(ori_mol)['adj']
+            #Chem.SanitizeMol(ori_mol, sanitizeOps=Chem.SanitizeFlags.SANITIZE_KEKULIZE)
+            # ori_ob['node'][i] = self.mol_to_graph(ori_mol)['node']
+            # ori_ob['adj'][i] = self.mol_to_graph(ori_mol)['adj']
             graph = mol_to_nx(mol)
             edges = graph.edges()
             # # always involve is_final probability
@@ -915,6 +908,7 @@ class MoleculeEnv(gym.Env):
                 begin_idx = graph_sub.nodes().index(edge[0])
                 end_idx = graph_sub.nodes().index(edge[1])
                 bond_type = graph[edge[0]][edge[1]]['bond_type']
+                #print(bond_type)
                 float_array = (bond_type == self.possible_bond_types).astype(float)
                 assert float_array.sum() != 0
                 ob['adj'][i, :, begin_idx, end_idx] = float_array
@@ -927,7 +921,7 @@ class MoleculeEnv(gym.Env):
             # from rdkit.Chem import Draw
             # Draw.MolToFile(rw_mol, 'ob' + str(i) + '.png')
 
-        return ob, ac, ori_ob
+        return ob, ac, ori_smi
 
 
 

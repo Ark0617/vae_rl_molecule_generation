@@ -46,6 +46,31 @@ def try_to_load_as_pickled_object_or_None(filepath):
     return obj
 
 
+def smile_convert(args, string):
+    if len(string) < args.smi_max_length:
+        if args.padding == 'right':
+            return string + " " * (args.smi_max_length - len(string))
+        elif args.padding == 'left':
+            return " " * (args.smi_max_length - len(string)) + string
+        elif args.padding == 'none':
+            return string
+
+
+def smi2vec(args, env, smi):
+    x = np.zeros((args.smi_max_length, len(env.smile_chars)), dtype=np.float32)
+    for t, char in enumerate(smi):
+        x[t, env.smi2index[char]] = 1
+    return x
+
+
+def batch_smi2vec(args, env, smis):
+    X = np.zeros((len(smis), args.smi_max_length, len(env.smile_chars)), dtype=np.float32)
+    for i, smile in enumerate(smis):
+        for t, char in enumerate(smile):
+            X[i, t, env.smi2index[char]] = 1
+    return X
+
+
 def traj_segment_generator(args, pi, env, horizon, stochastic, d_step_func, d_final_func):
     t = 0
     ac = env.action_space.sample()  # not used, just so we have the datatype
@@ -55,12 +80,9 @@ def traj_segment_generator(args, pi, env, horizon, stochastic, d_step_func, d_fi
     ob_adj = ob['adj']
     ob_node = ob['node']
     cur_cond_smile = random.sample(cond_smile, 1)[0]
+    cur_cond_smile_vec = smi2vec(args, env, smile_convert(args, cur_cond_smile))
     env.update_cond_smile(cur_cond_smile)
-    cur_cond_mol = Chem.MolFromSmiles(cur_cond_smile)
-    cur_cond_ob = env.mol_to_graph(cur_cond_mol)
-    cond_ob_adj = cur_cond_ob['adj']
-    cond_ob_node = cur_cond_ob['node']
-    cur_cond_sample = np.random.randn(1, ob['node'].shape[1], ob['node'].shape[2])#tf.random_normal([ob['node'].shape[0], 1, ob['node'].shape[2], args.emb_size])
+    cur_cond_sample = np.random.randn(1, ob['node'].shape[-2])
     cur_ep_ret = 0  # return in current episode
     cur_ep_ret_env = 0
     cur_ep_ret_d_step = 0
@@ -75,18 +97,14 @@ def traj_segment_generator(args, pi, env, horizon, stochastic, d_step_func, d_fi
     ep_lens_valid = []  # lengths of ...
     ep_rew_final = []
     ep_rew_final_stat = []
-    ep_cond_adjs = []
-    ep_cond_nodes = []
-    ep_cond_smiles = []
+    ep_cond_smiles_vec = []
     ep_cond_samples = []
 
     # Initialize history arrays
     # obs = np.array([ob for _ in range(horizon)])
     ob_adjs = np.array([ob_adj for _ in range(horizon)])
     ob_nodes = np.array([ob_node for _ in range(horizon)])
-    cond_ob_adjs = np.array([cond_ob_adj for _ in range(horizon)])
-    cond_ob_nodes = np.array([cond_ob_node for _ in range(horizon)])
-    cond_smiles = np.array([cur_cond_smile for _ in range(horizon)])
+    cond_smiles_vec = np.array([cur_cond_smile_vec for _ in range(horizon)])
     cond_samples = np.array([cur_cond_sample for _ in range(horizon)])
     ob_adjs_final = []
     ob_nodes_final = []
@@ -100,7 +118,7 @@ def traj_segment_generator(args, pi, env, horizon, stochastic, d_step_func, d_fi
         # print('-------ac-call-----------')
         #if args.has_cond == 1:
         if args.is_train == 1:
-            ac, vpred, debug = pi.cond_train_act(stochastic, ob, cur_cond_ob, cur_cond_sample)
+            ac, vpred, debug = pi.cond_train_act(stochastic, ob, cur_cond_smile_vec, cur_cond_sample)
         else:
             ac, vpred, debug = pi.cond_gen_act(stochastic, ob, cur_cond_sample)
         # else:
@@ -118,10 +136,10 @@ def traj_segment_generator(args, pi, env, horizon, stochastic, d_step_func, d_fi
         # before returning segment [0, T-1] so we get the correct
         # terminal value
         if t > 0 and t % horizon == 0:
-            yield {"ob_adj": ob_adjs, "ob_node": ob_nodes, "cond_ob_adj": cond_ob_adjs, "cond_ob_node": cond_ob_nodes,
+            yield {"ob_adj": ob_adjs, "ob_node": ob_nodes, "cond_smi_vec": cond_smiles_vec,
                    "cond_sample": cond_samples, "ep_cond_sample": ep_cond_samples,
                    "ob_adj_final": np.array(ob_adjs_final), "ob_node_final": np.array(ob_nodes_final),
-                   "ep_cond_adj": ep_cond_adjs, "ep_cond_node": ep_cond_nodes,  "rew": rews, "vpred": vpreds, "new": news,
+                   "ep_cond_smiles_vec": ep_cond_smiles_vec,  "rew": rews, "vpred": vpreds, "new": news,
                     "ac": acs, "prevac": prevacs, "nextvpred": vpred * (1 - new), "ep_rets": ep_rets, "ep_lens": ep_lens,
                    "ep_lens_valid": ep_lens_valid, "ep_final_rew": ep_rew_final, "ep_final_rew_stat": ep_rew_final_stat,
                    "ep_rets_env": ep_rets_env, "ep_rets_d_step": ep_rets_d_step, "ep_rets_d_final": ep_rets_d_final}
@@ -132,24 +150,20 @@ def traj_segment_generator(args, pi, env, horizon, stochastic, d_step_func, d_fi
             ep_lens_valid = []
             ep_rew_final = []
             ep_rew_final_stat = []
-            ep_cond_adjs = []
-            ep_cond_nodes = []
-            ep_cond_smiles = []
             ep_rets_d_step = []
             ep_rets_d_final = []
             ep_rets_env = []
             ob_adjs_final = []
             ob_nodes_final = []
             ep_cond_samples = []
+            ep_cond_smiles_vec = []
 
 
         i = t % horizon
         # obs[i] = ob
         ob_adjs[i] = ob['adj']
         ob_nodes[i] = ob['node']
-        cond_ob_adjs[i] = cur_cond_ob['adj']
-        cond_ob_nodes[i] = cur_cond_ob['node']
-        cond_smiles[i] = cur_cond_smile
+        cond_smiles_vec[i] = cur_cond_smile_vec
         cond_samples[i] = cur_cond_sample
         vpreds[i] = vpred
         news[i] = new
@@ -166,19 +180,19 @@ def traj_segment_generator(args, pi, env, horizon, stochastic, d_step_func, d_fi
             if args.has_d_step == 1:
                 if args.gan_type == 'normal' or args.gan_type == 'wgan':
                     rew_d_step = args.gan_step_ratio * (
-                        d_step_func(ob['adj'][np.newaxis, :, :, :], ob['node'][np.newaxis, :, :, :], cur_cond_ob['adj'][np.newaxis, :, :, :], cur_cond_ob['node'][np.newaxis, :, :, :])) / env.max_atom
+                        d_step_func(ob['adj'][np.newaxis, :, :, :], ob['node'][np.newaxis, :, :, :], cur_cond_smile_vec[np.newaxis, :, :])) / env.max_atom
                 elif args.gan_type == 'recommend':
                     rew_d_step = args.gan_step_ratio * (
-                        max(1-d_step_func(ob['adj'][np.newaxis, :, :, :], ob['node'][np.newaxis, :, :, :], cur_cond_ob['adj'][np.newaxis, :, :, :], cur_cond_ob['node'][np.newaxis, :, :, :]), -2)) / env.max_atom
+                        max(1-d_step_func(ob['adj'][np.newaxis, :, :, :], ob['node'][np.newaxis, :, :, :], cur_cond_smile_vec[np.newaxis, :, :]), -2)) / env.max_atom
 
         if new:
             if args.has_d_final == 1:
                 if args.gan_type == 'normal' or args.gan_type == 'wgan':
                     rew_d_final = args.gan_final_ratio * (
-                        d_final_func(ob['adj'][np.newaxis, :, :, :], ob['node'][np.newaxis, :, :, :], cur_cond_ob['adj'][np.newaxis, :, :, :], cur_cond_ob['node'][np.newaxis, :, :, :]))
+                        d_final_func(ob['adj'][np.newaxis, :, :, :], ob['node'][np.newaxis, :, :, :], cur_cond_smile_vec[np.newaxis, :, :]))
                 elif args.gan_type == 'recommend':
                     rew_d_final = args.gan_final_ratio * (
-                        max(1 - d_final_func(ob['adj'][np.newaxis, :, :, :], ob['node'][np.newaxis, :, :, :], cur_cond_ob['adj'][np.newaxis, :, :, :], cur_cond_ob['node'][np.newaxis, :, :, :]),
+                        max(1 - d_final_func(ob['adj'][np.newaxis, :, :, :], ob['node'][np.newaxis, :, :, :], cur_cond_smile_vec[np.newaxis, :, :]),
                             -2))
             # if args.has_cond == 1:
             #     rew_recons_final, _ = args.final_recons_ratio * rew_final_func(cond_ob['adj'][np.newaxis, :, :, :],
@@ -204,9 +218,7 @@ def traj_segment_generator(args, pi, env, horizon, stochastic, d_step_func, d_fi
 
             ob_adjs_final.append(ob['adj'])
             ob_nodes_final.append(ob['node'])
-            ep_cond_adjs.append(cur_cond_ob['adj'])
-            ep_cond_nodes.append(cur_cond_ob['node'])
-            ep_cond_smiles.append(cur_cond_smile)
+            ep_cond_smiles_vec.append(cur_cond_smile_vec)
             ep_rets.append(cur_ep_ret)
             ep_rets_env.append(cur_ep_ret_env)
             ep_rets_d_step.append(cur_ep_ret_d_step)
@@ -216,9 +228,6 @@ def traj_segment_generator(args, pi, env, horizon, stochastic, d_step_func, d_fi
             ep_rew_final.append(rew_env)
             ep_rew_final_stat.append(info['final_stat'])
             ep_cond_samples.append(cur_cond_sample)
-            # if args.is_train == 1 and args.has_cond == 1:
-            #     ep_cond_means.append(train_cond_mean)
-            #     ep_cond_logstds.append(train_cond_logstd)
             cur_ep_ret = 0
             cur_ep_len = 0
             cur_ep_len_valid = 0
@@ -226,10 +235,10 @@ def traj_segment_generator(args, pi, env, horizon, stochastic, d_step_func, d_fi
             cur_ep_ret_d_final = 0
             cur_ep_ret_env = 0
             cur_cond_smile = random.sample(cond_smile, 1)[0]
+            cur_cond_smile_vec = smi2vec(args, env, smile_convert(args, cur_cond_smile))
             env.update_cond_smile(cur_cond_smile)
-            cur_cond_mol = Chem.MolFromSmiles(cur_cond_smile)
-            cur_cond_ob = env.mol_to_graph(cur_cond_mol)
-            cur_cond_sample = np.random.randn(1, ob['node'].shape[1], ob['node'].shape[2])
+
+            cur_cond_sample = np.random.randn(1, ob['node'].shape[-2])
             ob = env.reset()
 
         t += 1
@@ -245,11 +254,10 @@ def traj_final_generator(args, pi, env, batch_size, stochastic):
     for i in range(batch_size):
         ob = env.reset()
         cur_cond_smile = random.sample(cond_smile, 1)[0]
-        cur_cond_mol = Chem.MolFromSmiles(cur_cond_smile)
-        cur_cond_ob = env.mol_to_graph(cur_cond_mol)
-        cur_cond_sample = np.random.randn(1, ob['node'].shape[1], ob['node'].shape[2])
+        cur_cond_smile_vec = smi2vec(args, env, smile_convert(args, cur_cond_smile))
+        cur_cond_sample = np.random.randn(1, ob['node'].shape[-2])
         while True:
-            ac, vpred, debug = pi.cond_train_act(stochastic, ob, cur_cond_ob, cur_cond_sample)
+            ac, vpred, debug = pi.cond_train_act(stochastic, ob, cur_cond_smile_vec, cur_cond_sample)
             ob, rew_env, new, info = env.step(ac)
             np.set_printoptions(precision=2, linewidth=200)
             # print('ac',ac)
@@ -278,7 +286,7 @@ def add_vtarg_and_adv(seg, gamma, lam):
     seg["tdlamret"] = seg["adv"] + seg["vpred"]
 
 
-def learn(args,env, policy_fn, *,
+def learn(args, env, policy_fn, *,
         timesteps_per_actorbatch, # timesteps per actor per update
         clip_param, entcoeff, # clipping parameter epsilon, entropy coeff
         optim_epochs, optim_stepsize, optim_batchsize,# optimization hypers
@@ -295,8 +303,8 @@ def learn(args,env, policy_fn, *,
     ac_space = env.action_space
     pi = policy_fn("pi", ob_space, ac_space)  # Construct network for new policy
     oldpi = policy_fn("oldpi", ob_space, ac_space)  # Network for old policy
-    atarg = tf.placeholder(dtype=tf.float32, shape=[None])  # Target advantage function (if applicable)
-    ret = tf.placeholder(dtype=tf.float32, shape=[None])  # Empirical return
+    atarg = tf.placeholder(name='atarg', dtype=tf.float32, shape=[None])  # Target advantage function (if applicable)
+    ret = tf.placeholder(name='ret', dtype=tf.float32, shape=[None])  # Empirical return
 
     lrmult = tf.placeholder(name='lrmult', dtype=tf.float32, shape=[]) # learning rate multiplier, updated with schedule
     clip_param = clip_param * lrmult  # Annealed cliping parameter epislon
@@ -306,12 +314,13 @@ def learn(args,env, policy_fn, *,
     ob['adj'] = U.get_placeholder_cached(name="adj")
     ob['node'] = U.get_placeholder_cached(name="node")
 
-    cond_ob = {}
-    cond_ob['adj'] = U.get_placeholder(shape=[None, ob_space['adj'].shape[0], None, None], dtype=tf.float32, name='cond_adj')
-    cond_ob['node'] = U.get_placeholder(shape=[None, 1, None, ob_space['node'].shape[2]], dtype=tf.float32, name='cond_node')
+    # cond_ob = {}
+    # cond_ob['adj'] = U.get_placeholder(shape=[None, ob_space['adj'].shape[0], None, None], dtype=tf.float32, name='cond_adj')
+    # cond_ob['node'] = U.get_placeholder(shape=[None, 1, None, ob_space['node'].shape[2]], dtype=tf.float32, name='cond_node')
     #cond_ob['ori_adj'] = tf.placeholder(shape=[None, ob_space['adj'].shape[0], None, None], dtype=tf.float32, name='cond_adj')
+    cond_smi_vec = U.get_placeholder(name='cond_smi', dtype=tf.float32, shape=[None, args.smi_max_length, len(env.smile_chars)])
 
-    cond_sample = U.get_placeholder(dtype=tf.float32, shape=[None, 1, None, ob_space['node'].shape[2]], name='normal_cond_sample')
+    cond_sample = U.get_placeholder(name='normal_cond_sample', dtype=tf.float32, shape=[None, 1, ob_space['node'].shape[1]])
     # cond_mean = tf.placeholder(shape=[None, 1, None, args.emb_size], name='cond_mean', dtype=tf.float32)
     # cond_logstd = tf.placeholder(shape=[None, 1, None, args.emb_size], name='cond_logstd', dtype=tf.float32)
 
@@ -326,7 +335,9 @@ def learn(args,env, policy_fn, *,
     # ac = pi.pdtype.sample_placeholder([None])
     # ac = tf.placeholder(dtype=tf.int64,shape=env.action_space.nvec.shape)
     ac = tf.placeholder(dtype=tf.int64, shape=[None, 4], name='ac_real')
-    cond_mean, cond_logstd = pi.encoder(args, cond_ob)
+    cond_mean, cond_logstd = pi.encoder(args, cond_smi_vec, ob_space['node'].shape[1])
+    # cond_mean = tf.expand_dims(cond_mean, axis=1)
+    # cond_logstd = tf.expand_dims(cond_logstd, axis=1)
     # cond_mean = tf.squeeze(cond_mean, axis=1)
     # cond_logstd = tf.squeeze(cond_logstd, axis=1)
     kl_loss = tf.reduce_mean(-0.5 * tf.reduce_sum(tf.reduce_sum(1 + cond_logstd - tf.square(cond_mean) - tf.exp(cond_logstd), axis=2), axis=1))
@@ -406,25 +417,25 @@ def learn(args,env, policy_fn, *,
 
     var_list_pi = pi.get_trainable_variables()
     var_list_pi_stop = [var for var in var_list_pi if ('emb' in var.name) or ('gcn' in var.name) or ('stop' in var.name)]
-    var_list_encoder = [var for var in tf.global_variables() if 'cond_encoder' in var.name]
+    #var_list_encoder = [var for var in tf.global_variables() if 'cond_encoder' in var.name]
     var_list_d_step = [var for var in tf.global_variables() if 'd_step' in var.name]
     var_list_d_final = [var for var in tf.global_variables() if 'd_final' in var.name]
 
 
     ## loss update function
-    lossandgrad_ppo = U.function([ob['adj'], ob['node'], cond_ob['adj'], cond_ob['node'], cond_sample, ac, pi.ac_real, oldpi.ac_real, atarg, ret, lrmult], losses + [kl_loss, U.flatgrad(total_loss+kl_loss, var_list_pi)])
-    lossandgrad_expert = U.function([ob['adj'], ob['node'], cond_ob['adj'], cond_ob['node'], cond_sample, ac, pi.ac_real], [loss_expert, kl_loss, U.flatgrad(loss_expert+kl_loss, var_list_pi)])
-    lossandgrad_expert_stop = U.function([ob['adj'], ob['node'], cond_ob['adj'], cond_ob['node'], cond_sample, ac, pi.ac_real], [loss_expert, U.flatgrad(loss_expert, var_list_pi_stop)])
+    lossandgrad_ppo = U.function([ob['adj'], ob['node'], cond_smi_vec, cond_sample, ac, pi.ac_real, oldpi.ac_real, atarg, ret, lrmult], losses + [kl_loss, U.flatgrad(total_loss+kl_loss, var_list_pi)])
+    lossandgrad_expert = U.function([ob['adj'], ob['node'], cond_smi_vec, cond_sample, ac, pi.ac_real], [loss_expert, kl_loss, U.flatgrad(loss_expert+kl_loss, var_list_pi)])
+    lossandgrad_expert_stop = U.function([ob['adj'], ob['node'], cond_smi_vec, cond_sample, ac, pi.ac_real], [loss_expert, U.flatgrad(loss_expert, var_list_pi_stop)])
     #lossandgrad_kl = U.function([cond_ob['adj'], cond_ob['node']], [kl_loss, U.flatgrad(kl_loss, var_list_encoder)])
     lossandgrad_d_step = U.function([ob_real['adj'], ob_real['node'], ob_gen['adj'], ob_gen['node']], [loss_d_step, U.flatgrad(loss_d_step, var_list_d_step)])
     lossandgrad_d_final = U.function([ob_real['adj'], ob_real['node'], ob_gen['adj'], ob_gen['node']], [loss_d_final, U.flatgrad(loss_d_final, var_list_d_final)])
-    loss_g_gen_step_func = U.function([ob_gen['adj'], ob_gen['node'], cond_ob['adj'], cond_ob['node']], loss_g_step_gen)
-    loss_g_gen_final_func = U.function([ob_gen['adj'], ob_gen['node'], cond_ob['adj'], cond_ob['node']], loss_g_final_gen)
+    loss_g_gen_step_func = U.function([ob_gen['adj'], ob_gen['node'], cond_smi_vec], loss_g_step_gen)
+    loss_g_gen_final_func = U.function([ob_gen['adj'], ob_gen['node'], cond_smi_vec], loss_g_final_gen)
 
 
 
     adam_pi = MpiAdam(var_list_pi, epsilon=adam_epsilon)
-    adam_encoder = MpiAdam(var_list_encoder, epsilon=adam_epsilon)
+    #adam_encoder = MpiAdam(var_list_encoder, epsilon=adam_epsilon)
     adam_pi_stop = MpiAdam(var_list_pi_stop, epsilon=adam_epsilon)
     adam_d_step = MpiAdam(var_list_d_step, epsilon=adam_epsilon)
     adam_d_final = MpiAdam(var_list_d_final, epsilon=adam_epsilon)
@@ -436,7 +447,8 @@ def learn(args,env, policy_fn, *,
     #
     # compute_losses_expert = U.function([ob['adj'], ob['node'], ac, pi.ac_real],
     #                                 loss_expert)
-    compute_losses = U.function([ob['adj'], ob['node'], cond_ob['adj'], cond_ob['node'], cond_sample, ac, pi.ac_real, oldpi.ac_real, atarg, ret, lrmult], losses)
+    compute_losses = U.function([ob['adj'], ob['node'], cond_smi_vec, cond_sample, ac, pi.ac_real, oldpi.ac_real, atarg, ret, lrmult], losses)
+
 
 
 
@@ -463,7 +475,7 @@ def learn(args,env, policy_fn, *,
     U.initialize()
     if args.load == 1:
         try:
-            fname = './ckpt/' + args.name_full + '_' + args.reward_type + '_'+str(args.has_cond)+'_' +str(args.rl_start)+'_'+ str(args.recons_ratio)+'_'+str(args.qed_ratio)+'_'+str(1200)  # load
+            fname = './ckpt/' + args.name_full + '_' + args.reward_type + '_'+str(args.has_cond)+'_' +str(args.rl_start)+'_'+ str(args.recons_ratio)+'_'+str(args.qed_ratio)+'_'+str(2600)  # load
             sess = tf.get_default_session()
             # sess.run(tf.global_variables_initializer())
             saver = tf.train.Saver(var_list_pi)
@@ -519,10 +531,10 @@ def learn(args,env, policy_fn, *,
             seg = seg_gen.__next__()
             add_vtarg_and_adv(seg, gamma, lam)
             # ob, ac, atarg, ret, td1ret = map(np.concatenate, (obs, acs, atargs, rets, td1rets))
-            ob_adj, ob_node, cond_ob_adj, cond_ob_node, normal_cond_sample, ac, atarg, tdlamret = seg["ob_adj"], seg["ob_node"], seg["cond_ob_adj"], seg["cond_ob_node"], seg["cond_sample"], seg["ac"], seg["adv"], seg["tdlamret"]
+            ob_adj, ob_node, cond_smi_vec, normal_cond_sample, ac, atarg, tdlamret = seg["ob_adj"], seg["ob_node"], seg[ "cond_smi_vec"], seg["cond_sample"], seg["ac"], seg["adv"], seg["tdlamret"]
             vpredbefore = seg["vpred"]  # predicted value function before udpate
             atarg = (atarg - atarg.mean()) / atarg.std()  # standardized advantage function estimate
-            d = Dataset(dict(ob_adj=ob_adj, ob_node=ob_node, cond_ob_adj=cond_ob_adj, cond_ob_node=cond_ob_node,
+            d = Dataset(dict(ob_adj=ob_adj, ob_node=ob_node, cond_smi_vec=cond_smi_vec,
                              normal_cond_sample=normal_cond_sample, ac=ac, atarg=atarg, vtarg=tdlamret),
                         shuffle=not pi.recurrent)
             optim_batchsize = optim_batchsize or ob_adj.shape[0]
@@ -560,11 +572,11 @@ def learn(args,env, policy_fn, *,
                     # ob_expert, ac_expert = env.get_expert(optim_batchsize, is_final=True)
                     # loss_expert_stop, g_expert_stop = lossandgrad_expert_stop(ob_expert['adj'], ob_expert['node'], ac_expert,ac_expert)
                     # loss_expert_stop = np.mean(loss_expert_stop)
-                    ob_expert, ac_expert, ori_ob_expert = env.get_expert(optim_batchsize)
-                    sample = np.random.randn(optim_batchsize, 1, ob_expert['node'].shape[2], ob_expert['node'].shape[3])
+                    ob_expert, ac_expert, ori_smi = env.get_expert(optim_batchsize)
+                    ori_smi_vec = batch_smi2vec(args, env, ori_smi)
+                    sample = np.random.randn(optim_batchsize, 1, ob_expert['node'].shape[-2])
                     #print(sample.shape)
-                    loss_expert, kl_loss, g_expert = lossandgrad_expert(ob_expert['adj'], ob_expert['node'], ori_ob_expert['adj'],
-                                                               ori_ob_expert['node'], sample, ac_expert, ac_expert)
+                    loss_expert, kl_loss, g_expert = lossandgrad_expert(ob_expert['adj'], ob_expert['node'], ori_smi_vec, sample, ac_expert, ac_expert)
                     #expert_kl_loss, expert_g_kl = lossandgrad_kl(batch["cond_ob_adj"], batch["cond_ob_node"])
                     loss_expert = np.mean(loss_expert)
                     #expert_kl_loss = np.mean(expert_kl_loss)
@@ -579,7 +591,7 @@ def learn(args,env, policy_fn, *,
                     # ppo
                     # if args.has_ppo==1:
                     if iters_so_far >= args.rl_start+pretrain_shift: # start generator after discriminator trained a well..
-                        *newlosses, kl_loss, g_ppo = lossandgrad_ppo(batch["ob_adj"], batch["ob_node"], batch["cond_ob_adj"], batch["cond_ob_node"], batch["normal_cond_sample"], batch["ac"], batch["ac"], batch["ac"], batch["atarg"], batch["vtarg"], cur_lrmult)
+                        *newlosses, kl_loss, g_ppo = lossandgrad_ppo(batch["ob_adj"], batch["ob_node"], batch["cond_smi_vec"], batch["normal_cond_sample"], batch["ac"], batch["ac"], batch["ac"], batch["atarg"], batch["vtarg"], cur_lrmult)
                         losses_ppo = newlosses
 
                     if args.has_d_step == 1 and i_optim >= optim_epochs//2:
@@ -622,7 +634,8 @@ def learn(args,env, policy_fn, *,
             # logger.log("Evaluating losses...")
             losses = []
             for batch in d.iterate_once(optim_batchsize):
-                newlosses = compute_losses(batch["ob_adj"], batch["ob_node"], batch["cond_ob_adj"], batch["cond_ob_node"], batch["normal_cond_sample"], batch["ac"], batch["ac"], batch["ac"], batch["atarg"], batch["vtarg"], cur_lrmult)
+                #print(batch["vtarg"].shape)
+                newlosses = compute_losses(batch["ob_adj"], batch["ob_node"], batch["cond_smi_vec"], batch["normal_cond_sample"], batch["ac"], batch["ac"], batch["ac"], batch["atarg"], batch["vtarg"], cur_lrmult)
                 losses.append(newlosses)
             meanlosses, _, _ = mpi_moments(losses, axis=0)
             # logger.log(fmt_row(13, meanlosses))
