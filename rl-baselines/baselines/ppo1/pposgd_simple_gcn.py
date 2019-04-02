@@ -47,7 +47,7 @@ def try_to_load_as_pickled_object_or_None(filepath):
 
 
 def smile_convert(args, string):
-    if len(string) < args.smi_max_length:
+    if len(string) <= args.smi_max_length:
         if args.padding == 'right':
             return string + " " * (args.smi_max_length - len(string))
         elif args.padding == 'left':
@@ -235,6 +235,7 @@ def traj_segment_generator(args, pi, env, horizon, stochastic, d_step_func, d_fi
             cur_ep_ret_d_final = 0
             cur_ep_ret_env = 0
             cur_cond_smile = random.sample(cond_smile, 1)[0]
+            #print(cur_cond_smile)
             cur_cond_smile_vec = smi2vec(args, env, smile_convert(args, cur_cond_smile))
             env.update_cond_smile(cur_cond_smile)
 
@@ -475,7 +476,7 @@ def learn(args, env, policy_fn, *,
     U.initialize()
     if args.load == 1:
         try:
-            fname = './ckpt/' + args.name_full + '_' + args.reward_type + '_'+str(args.has_cond)+'_' +str(args.rl_start)+'_'+ str(args.recons_ratio)+'_'+str(args.qed_ratio)+'_'+str(2600)  # load
+            fname = './ckpt/' + args.name_full + '_' + args.reward_type + '_'+str(args.has_cond)+'_' +str(args.rl_start)+'_'+ str(args.recons_ratio)+'_'+str(args.qed_ratio)+'_'+str(1200)  # load
             sess = tf.get_default_session()
             # sess.run(tf.global_variables_initializer())
             saver = tf.train.Saver(var_list_pi)
