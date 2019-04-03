@@ -6,7 +6,7 @@ from baselines import logger
 from tensorboardX import SummaryWriter
 import os
 import tensorflow as tf
-
+#from tensorflow.python.client import device_lib
 import gym
 from gym_molecule.envs.molecule import GraphEnv
 
@@ -34,7 +34,7 @@ def train(args, seed, writer=None):
     def policy_fn(name, ob_space, ac_space):
         return gcn_policy.GCNPolicy(name=name, ob_space=ob_space, ac_space=ac_space, atom_type_num=env.atom_type_num, char_type_num=len(env.smile_chars), args=args)
     env.seed(workerseed)
-
+    #print(device_lib.list_local_devices())
     pposgd_simple_gcn.learn(args, env, policy_fn,
         max_timesteps=args.num_steps,
         timesteps_per_actorbatch=256,
