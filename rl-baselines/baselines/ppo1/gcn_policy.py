@@ -199,7 +199,8 @@ class GCNPolicy(object):
             sample = cond_sample
         #print('hhhhhh: ', sample.shape)
         sample = tf.expand_dims(sample, axis=-1)
-        concat_vec = tf.concat([ob['node'], sample], axis=-1)
+        ob_node_emb = tf.layers.dense(ob['node'], ob_space['node'].shape[2], activation=None, use_bias=False)
+        concat_vec = tf.concat([ob_node_emb, sample], axis=-1)  # b*1*n*(f+1)
         fusion_emb = tf.layers.dense(concat_vec, 8, activation=None, use_bias=False, name='fusion_layer')
         self.ac_real = U.get_placeholder(name='ac_real', dtype=tf.int64, shape=[None, 4])  # feed groudtruth action
         if args.has_cond:
@@ -246,7 +247,7 @@ class GCNPolicy(object):
         emb_graph = tf.reduce_sum(emb_node, axis=1, keepdims=True)
         if args.graph_emb == 1:
             emb_graph = tf.tile(emb_graph, [1, tf.shape(emb_node)[1], 1])
-            emb_node = tf.concat([emb_node, emb_graph], axis=2)
+            emb_node = tf.concat([emb_node, emb_graph], axis=2)  # B*v*2h
 
         ### 2 predict stop
         emb_stop = tf.layers.dense(emb_node, args.emb_size, activation=tf.nn.relu, use_bias=False, name='linear_stop1')

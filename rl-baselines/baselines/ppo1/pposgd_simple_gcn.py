@@ -337,6 +337,7 @@ def learn(args, env, policy_fn, *,
     # ac = tf.placeholder(dtype=tf.int64,shape=env.action_space.nvec.shape)
     ac = tf.placeholder(dtype=tf.int64, shape=[None, 4], name='ac_real')
     cond_mean, cond_logstd = pi.encoder(args, cond_smi_vec, ob_space['node'].shape[1])
+    #print(cond_logstd.shape)
     # cond_mean = tf.expand_dims(cond_mean, axis=1)
     # cond_logstd = tf.expand_dims(cond_logstd, axis=1)
     # cond_mean = tf.squeeze(cond_mean, axis=1)
@@ -424,7 +425,7 @@ def learn(args, env, policy_fn, *,
 
 
     ## loss update function
-    lossandgrad_ppo = U.function([ob['adj'], ob['node'], cond_smi_vec, cond_sample, ac, pi.ac_real, oldpi.ac_real, atarg, ret, lrmult], losses + [kl_loss, U.flatgrad(total_loss+kl_loss, var_list_pi)])
+    lossandgrad_ppo = U.function([ob['adj'], ob['node'], cond_smi_vec, cond_sample, ac, pi.ac_real, oldpi.ac_real, atarg, ret, lrmult], losses + [kl_loss, U.flatgrad(total_loss+2*kl_loss, var_list_pi)])
     lossandgrad_expert = U.function([ob['adj'], ob['node'], cond_smi_vec, cond_sample, ac, pi.ac_real], [loss_expert, kl_loss, U.flatgrad(loss_expert+kl_loss, var_list_pi)])
     lossandgrad_expert_stop = U.function([ob['adj'], ob['node'], cond_smi_vec, cond_sample, ac, pi.ac_real], [loss_expert, U.flatgrad(loss_expert, var_list_pi_stop)])
     #lossandgrad_kl = U.function([cond_ob['adj'], cond_ob['node']], [kl_loss, U.flatgrad(kl_loss, var_list_encoder)])
@@ -476,7 +477,7 @@ def learn(args, env, policy_fn, *,
     U.initialize()
     if args.load == 1:
         try:
-            fname = './ckpt/' + args.name_full + '_' + args.reward_type + '_'+str(args.has_cond)+'_' +str(args.rl_start)+'_'+ str(args.recons_ratio)+'_'+str(args.qed_ratio)+'_'+str(1200)  # load
+            fname = './ckpt/' + args.name_full + '_' + args.reward_type + '_'+str(args.has_cond)+'_' +str(args.rl_start)+'_'+ str(int(args.recons_ratio))+'_'+str(int(args.qed_ratio))+'_'+str(4800)  # load
             sess = tf.get_default_session()
             # sess.run(tf.global_variables_initializer())
             saver = tf.train.Saver(var_list_pi)
@@ -562,7 +563,7 @@ def learn(args, env, policy_fn, *,
                 g_kl = 0
 
                 pretrain_shift = 5
-                batch = d.next_batch(optim_batchsize)
+                # batch = d.next_batch(optim_batchsize)
                 # kl_loss, g_kl = lossandgrad_kl(batch["cond_ob_adj"], batch["cond_ob_node"])
                 # kl_loss = np.mean(kl_loss)
                 # adam_encoder.update(g_kl, optim_stepsize * cur_lrmult)
@@ -585,7 +586,7 @@ def learn(args, env, policy_fn, *,
                 ## PPO
                 if iters_so_far >= args.rl_start and iters_so_far <= args.rl_end:
                     assign_old_eq_new()  # set old parameter values to new parameter values
-                    # batch = d.next_batch(optim_batchsize)
+                    batch = d.next_batch(optim_batchsize)
                     #rl_kl_loss, rl_g_kl = lossandgrad_kl(batch["cond_ob_adj"], batch["cond_ob_node"])
                     #rl_kl_loss = np.mean(rl_kl_loss)
                     #adam_encoder.update(rl_g_kl, optim_stepsize * cur_lrmult)

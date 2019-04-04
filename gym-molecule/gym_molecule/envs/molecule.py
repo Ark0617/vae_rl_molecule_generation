@@ -1410,14 +1410,16 @@ def steric_strain_filter(mol, cutoff=0.82,
 
 def reward_target(mol, target, ratio, val_max, val_min, func):
     x = func(mol)
-    reward = max(-1*np.abs((x-target)/ratio) + val_max,val_min)
+    reward = max(-1*np.abs((x-target)/ratio) + val_max, val_min)
     return reward
+
 
 def reward_target_new(mol, func,r_max1=4,r_max2=2.25,r_mid=2,r_min=-2,x_start=500., x_mid=525.):
     x = func(mol)
-    return max((r_max1-r_mid)/(x_start-x_mid)*np.abs(x-x_mid)+r_max1, (r_max2-r_mid)/(x_start-x_mid)*np.abs(x-x_mid)+r_max2,r_min)
+    return max((r_max1-r_mid)/(x_start-x_mid)*np.abs(x-x_mid)+r_max1, (r_max2-r_mid)/(x_start-x_mid)*np.abs(x-x_mid)+r_max2, r_min)
 
-def reward_target_logp(mol, target,ratio=0.5,max=4):
+
+def reward_target_logp(mol, target, ratio=0.5, max=4):
     """
     Reward for a target log p
     :param mol: rdkit mol object
@@ -1427,6 +1429,7 @@ def reward_target_logp(mol, target,ratio=0.5,max=4):
     x = MolLogP(mol)
     reward = -1 * np.abs((x - target)/ratio) + max
     return reward
+
 
 def reward_target_penalizelogp(mol, target,ratio=3,max=4):
     """
@@ -1439,6 +1442,7 @@ def reward_target_penalizelogp(mol, target,ratio=3,max=4):
     reward = -1 * np.abs((x - target)/ratio) + max
     return reward
 
+
 def reward_target_qed(mol, target,ratio=0.1,max=4):
     """
     Reward for a target log p
@@ -1450,6 +1454,7 @@ def reward_target_qed(mol, target,ratio=0.1,max=4):
     reward = -1 * np.abs((x - target)/ratio) + max
     return reward
 
+
 def reward_target_mw(mol, target,ratio=40,max=4):
     """
     Reward for a target molecular weight
@@ -1460,6 +1465,7 @@ def reward_target_mw(mol, target,ratio=40,max=4):
     x = rdMolDescriptors.CalcExactMolWt(mol)
     reward = -1 * np.abs((x - target)/ratio) + max
     return reward
+
 
 # TODO(Bowen): num rings is a discrete variable, so what is the best way to
 # calculate the reward?
@@ -1473,6 +1479,7 @@ def reward_target_num_rings(mol, target):
     x = rdMolDescriptors.CalcNumRings(mol)
     reward = -1 * (x - target)**2 + 1
     return reward
+
 
 # TODO(Bowen): more efficient if we precalculate the target fingerprint
 from rdkit import DataStructs

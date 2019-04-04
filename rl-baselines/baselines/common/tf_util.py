@@ -55,7 +55,7 @@ def make_session(num_cpu=None, make_default=False):
         num_cpu = int(os.getenv('RCALL_NUM_CPU', multiprocessing.cpu_count()))
     tf_config = tf.ConfigProto(
         inter_op_parallelism_threads=num_cpu,
-        intra_op_parallelism_threads=num_cpu, log_device_placement=True)
+        intra_op_parallelism_threads=num_cpu)#, log_device_placement=True)
     tf_config.gpu_options.allocator_type = 'BFC'
     if make_default:
         return tf.InteractiveSession(config=tf_config)
