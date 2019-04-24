@@ -29,6 +29,37 @@ def GCN(adj, node_feature, out_channels, is_act=True, is_normalize=False, name='
             node_embedding = tf.nn.l2_normalize(node_embedding,axis=-1)
         return node_embedding
 
+
+def GCN_cond_batch(adj, node_feature, sample_mat, out_channels, is_act=True, is_normalize=False, name='gcn_cond_simple',aggregate='sum'):
+    edge_dim = adj.get_shape()[1]
+    batch_size = tf.shape(adj)[0]
+    in_channels = node_feature.get_shape()[-1]
+
+    with tf.variable_scope(name, reuse=tf.AUTO_REUSE):
+        W = tf.get_variable("W", [1, edge_dim, in_channels, out_channels], initializer=tf.glorot_uniform_initializer())
+        b = tf.get_variable("b", [1, edge_dim, 1, out_channels])
+        smp_w = tf.get_variable('sample_w', shape=[1, edge_dim, in_channels, out_channels],
+                                dtype=tf.float32, initializer=tf.glorot_uniform_initializer())
+        sample_mat = tf.layers.dense(sample_mat, in_channels, activation=None, use_bias=False, name='fus_sample')
+        # node_embedding = adj@tf.tile(node_feature,[1,edge_dim,1,1])@tf.tile(W,[batch_size,1,1,1])+b # todo: tf.tile sum the gradients, may need to change
+        node_embedding = adj @ tf.tile(node_feature, [1, edge_dim, 1, 1]) @ tf.tile(W, [batch_size, 1, 1, 1]) + tf.tile(
+            sample_mat, [1, edge_dim, 1, 1]) @ tf.tile(smp_w, [batch_size, 1, 1,
+                                                               1])  # todo: tf.tile sum the gradients, may need to change
+        if is_act:
+            node_embedding = tf.nn.relu(node_embedding)
+        if aggregate == 'sum':
+            node_embedding = tf.reduce_sum(node_embedding, axis=1, keepdims=True)  # mean pooling
+        elif aggregate == 'mean':
+            node_embedding = tf.reduce_mean(node_embedding, axis=1, keepdims=True)  # mean pooling
+        elif aggregate == 'concat':
+            node_embedding = tf.concat(tf.split(node_embedding, axis=1, num_or_size_splits=edge_dim), axis=3)
+        else:
+            print('GCN aggregate error!')
+        if is_normalize:
+            node_embedding = tf.nn.l2_normalize(node_embedding, axis=-1)
+        return node_embedding
+
+
 # gcn mean aggregation over edge features
 def GCN_batch(adj, node_feature, out_channels, is_act=True, is_normalize=False, name='gcn_simple',aggregate='sum'):
     '''
@@ -190,42 +221,46 @@ class GCNPolicy(object):
         # only when evaluating given action, at training time(expert training)
         # cond_ob = {}
         cond_sample = U.get_placeholder(name='normal_cond_sample', dtype=tf.float32,
-                                        shape=[None, 1, ob_space['node'].shape[1]])
+                                        shape=[None, 1, ob_space['node'].shape[2]])
 
         if args.is_train == 1:
-            cond_mean, cond_log_std = self.encoder(args, cond_smi, ob_space['node'].shape[1])
-            sample = cond_mean + cond_sample * tf.exp(cond_log_std)  # b*1*n
+            cond_mean, cond_log_std = self.encoder(args, cond_smi, ob_space['node'].shape[2])
+            sample = cond_mean + cond_sample * tf.exp(cond_log_std)  # b*1*f
         else:
             sample = cond_sample
         #print('hhhhhh: ', sample.shape)
-        sample = tf.expand_dims(sample, axis=-1)
-        ob_node_emb = tf.layers.dense(ob['node'], ob_space['node'].shape[2], activation=None, use_bias=False)
-        concat_vec = tf.concat([ob_node_emb, sample], axis=-1)  # b*1*n*(f+1)
-        fusion_emb = tf.layers.dense(concat_vec, 8, activation=None, use_bias=False, name='fusion_layer')
+        sample = tf.expand_dims(sample, axis=2)  # b*1*1*f
+        smi_feature_mat = tf.tile(sample, [1, 1, ob_space['node'].shape[1], 1])
+        # with tf.variable_scope('smp_w', reuse=tf.AUTO_REUSE):
+        #     smp_w = tf.get_variable('sample_w', shape=[1, 1, ob_space['node'].shape[2], ob_space['node'].shape[2]], dtype=tf.float32, initializer=tf.glorot_uniform_initializer())
+        #ob_node_emb = tf.layers.dense(ob['node'], ob_space['node'].shape[2], activation=None, use_bias=False)
+        #concat_vec = tf.concat([ob_node_emb, sample], axis=-1)  # b*1*n*(f+1)
+        #concat_vec = ob['node'] + smi_feature_mat @ tf.tile(smp_w, [args.batch_size, 1, 1, 1])
+        #fusion_emb = tf.layers.dense(concat_vec, 8, activation=None, use_bias=False, name='fusion_layer')
         self.ac_real = U.get_placeholder(name='ac_real', dtype=tf.int64, shape=[None, 4])  # feed groudtruth action
-        if args.has_cond:
-            ob_node = fusion_emb
-            print(ob_node.shape)
-        else:
-            ob_node = tf.layers.dense(ob['node'], 8, activation=None, use_bias=False, name='emb')  # embedding layer
+        # if args.has_cond:
+        #     ob_node = fusion_emb
+        #     print(ob_node.shape)
+        # else:
+        ob_node = tf.layers.dense(ob['node'], 8, activation=None, use_bias=False, name='emb')  # embedding layer
         if args.bn == 1:
             ob_node = tf.layers.batch_normalization(ob_node, axis=-1)
         if args.has_concat == 1:
-            emb_node = tf.concat((GCN_batch(ob['adj'], ob_node, args.emb_size, name='gcn1', aggregate=args.gcn_aggregate), ob_node), axis=-1)
+            emb_node = tf.concat((GCN_cond_batch(ob['adj'], ob_node, smi_feature_mat, args.emb_size, name='gcn1', aggregate=args.gcn_aggregate), ob_node), axis=-1)
         else:
-            emb_node = GCN_batch(ob['adj'], ob_node, args.emb_size, name='gcn1', aggregate=args.gcn_aggregate)
+            emb_node = GCN_cond_batch(ob['adj'], ob_node, smi_feature_mat, args.emb_size, name='gcn1', aggregate=args.gcn_aggregate)
         if args.bn == 1:
             emb_node = tf.layers.batch_normalization(emb_node, axis=-1)
         for i in range(args.layer_num_g-2):
             if args.has_residual == 1:
-                emb_node = GCN_batch(ob['adj'], emb_node, args.emb_size, name='gcn1_'+str(i+1), aggregate=args.gcn_aggregate)+self.emb_node1  #what is emb_node1
+                emb_node = GCN_cond_batch(ob['adj'], emb_node, smi_feature_mat, args.emb_size, name='gcn1_'+str(i+1), aggregate=args.gcn_aggregate)+self.emb_node1  #what is emb_node1
             elif args.has_concat == 1:
-                emb_node = tf.concat(GCN_batch(ob['adj'], emb_node, args.emb_size, name='gcn1_'+str(i+1),aggregate=args.gcn_aggregate), self.emb_node1, axis=-1)
+                emb_node = tf.concat(GCN_cond_batch(ob['adj'], emb_node, smi_feature_mat, args.emb_size, name='gcn1_'+str(i+1),aggregate=args.gcn_aggregate), self.emb_node1, axis=-1)
             else:
-                emb_node = GCN_batch(ob['adj'], emb_node, args.emb_size, name='gcn1_' + str(i + 1),aggregate=args.gcn_aggregate)
+                emb_node = GCN_cond_batch(ob['adj'], emb_node, smi_feature_mat, args.emb_size, name='gcn1_' + str(i + 1),aggregate=args.gcn_aggregate)
             if args.bn == 1:
                 emb_node = tf.layers.batch_normalization(emb_node, axis=-1)
-        emb_node = GCN_batch(ob['adj'], emb_node, args.emb_size, is_act=False, is_normalize=(args.bn == 0), name='gcn2', aggregate=args.gcn_aggregate)
+        emb_node = GCN_cond_batch(ob['adj'], emb_node, smi_feature_mat, args.emb_size, is_act=False, is_normalize=(args.bn == 0), name='gcn2', aggregate=args.gcn_aggregate)
         emb_node = tf.squeeze(emb_node, axis=1)  # B*v*h
         # concat_emb = tf.concat([emb_node, sample], axis=-1)
         # fusion_emb = tf.layers.dense(concat_emb, args.emb_size, activation=None, use_bias=False, name='fusion_layer')
@@ -381,7 +416,7 @@ class GCNPolicy(object):
         elif args.is_train == 0:
             self._act = U.function([stochastic, ob['adj'], ob['node'], cond_sample], [self.ac, self.vpred, debug])
 
-    def encoder(self, args, smiles, max_atom_num):  # b * max_len * char_types
+    def encoder(self, args, smiles, num_features):  # b * max_len * char_types
         emb_smiles = tf.layers.conv1d(smiles, 8, 8, activation=tf.nn.tanh)
         if args.bn == 1:
             emb_smiles = tf.layers.batch_normalization(emb_smiles, axis=-1)
@@ -394,8 +429,8 @@ class GCNPolicy(object):
             emb_smiles = tf.layers.dense(emb_smiles, 50, activation=tf.nn.tanh)
             if args.bn == 1:
                 emb_smiles = tf.layers.batch_normalization(emb_smiles, axis=-1)
-        cond_mean = tf.expand_dims(tf.layers.dense(emb_smiles, max_atom_num), axis=1)
-        cond_log_std = tf.expand_dims(tf.layers.dense(emb_smiles, max_atom_num), axis=1)
+        cond_mean = tf.expand_dims(tf.layers.dense(emb_smiles, num_features), axis=1)
+        cond_log_std = tf.expand_dims(tf.layers.dense(emb_smiles, num_features), axis=1)
         return cond_mean, cond_log_std
 
     def act(self, stochastic, ob):

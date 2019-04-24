@@ -82,7 +82,7 @@ def traj_segment_generator(args, pi, env, horizon, stochastic, d_step_func, d_fi
     cur_cond_smile = random.sample(cond_smile, 1)[0]
     cur_cond_smile_vec = smi2vec(args, env, smile_convert(args, cur_cond_smile))
     env.update_cond_smile(cur_cond_smile)
-    cur_cond_sample = np.random.randn(1, ob['node'].shape[-2])
+    cur_cond_sample = np.random.randn(1, ob['node'].shape[-1])
     cur_ep_ret = 0  # return in current episode
     cur_ep_ret_env = 0
     cur_ep_ret_d_step = 0
@@ -239,7 +239,7 @@ def traj_segment_generator(args, pi, env, horizon, stochastic, d_step_func, d_fi
             cur_cond_smile_vec = smi2vec(args, env, smile_convert(args, cur_cond_smile))
             env.update_cond_smile(cur_cond_smile)
 
-            cur_cond_sample = np.random.randn(1, ob['node'].shape[-2])
+            cur_cond_sample = np.random.randn(1, ob['node'].shape[-1])
             ob = env.reset()
 
         t += 1
@@ -256,7 +256,7 @@ def traj_final_generator(args, pi, env, batch_size, stochastic):
         ob = env.reset()
         cur_cond_smile = random.sample(cond_smile, 1)[0]
         cur_cond_smile_vec = smi2vec(args, env, smile_convert(args, cur_cond_smile))
-        cur_cond_sample = np.random.randn(1, ob['node'].shape[-2])
+        cur_cond_sample = np.random.randn(1, ob['node'].shape[-1])
         while True:
             ac, vpred, debug = pi.cond_train_act(stochastic, ob, cur_cond_smile_vec, cur_cond_sample)
             ob, rew_env, new, info = env.step(ac)
@@ -321,7 +321,7 @@ def learn(args, env, policy_fn, *,
     #cond_ob['ori_adj'] = tf.placeholder(shape=[None, ob_space['adj'].shape[0], None, None], dtype=tf.float32, name='cond_adj')
     cond_smi_vec = U.get_placeholder(name='cond_smi', dtype=tf.float32, shape=[None, args.smi_max_length, len(env.smile_chars)])
 
-    cond_sample = U.get_placeholder(name='normal_cond_sample', dtype=tf.float32, shape=[None, 1, ob_space['node'].shape[1]])
+    cond_sample = U.get_placeholder(name='normal_cond_sample', dtype=tf.float32, shape=[None, 1, ob_space['node'].shape[2]])
     # cond_mean = tf.placeholder(shape=[None, 1, None, args.emb_size], name='cond_mean', dtype=tf.float32)
     # cond_logstd = tf.placeholder(shape=[None, 1, None, args.emb_size], name='cond_logstd', dtype=tf.float32)
 
@@ -425,7 +425,7 @@ def learn(args, env, policy_fn, *,
 
 
     ## loss update function
-    lossandgrad_ppo = U.function([ob['adj'], ob['node'], cond_smi_vec, cond_sample, ac, pi.ac_real, oldpi.ac_real, atarg, ret, lrmult], losses + [kl_loss, U.flatgrad(total_loss+2*kl_loss, var_list_pi)])
+    lossandgrad_ppo = U.function([ob['adj'], ob['node'], cond_smi_vec, cond_sample, ac, pi.ac_real, oldpi.ac_real, atarg, ret, lrmult], losses + [kl_loss, U.flatgrad(total_loss+kl_loss, var_list_pi)])
     lossandgrad_expert = U.function([ob['adj'], ob['node'], cond_smi_vec, cond_sample, ac, pi.ac_real], [loss_expert, kl_loss, U.flatgrad(loss_expert+kl_loss, var_list_pi)])
     lossandgrad_expert_stop = U.function([ob['adj'], ob['node'], cond_smi_vec, cond_sample, ac, pi.ac_real], [loss_expert, U.flatgrad(loss_expert, var_list_pi_stop)])
     #lossandgrad_kl = U.function([cond_ob['adj'], cond_ob['node']], [kl_loss, U.flatgrad(kl_loss, var_list_encoder)])
@@ -541,7 +541,6 @@ def learn(args, env, policy_fn, *,
                         shuffle=not pi.recurrent)
             optim_batchsize = optim_batchsize or ob_adj.shape[0]
 
-
             # inner training loop, train policy
             for i_optim in range(optim_epochs):
 
@@ -576,7 +575,7 @@ def learn(args, env, policy_fn, *,
                     # loss_expert_stop = np.mean(loss_expert_stop)
                     ob_expert, ac_expert, ori_smi = env.get_expert(optim_batchsize)
                     ori_smi_vec = batch_smi2vec(args, env, ori_smi)
-                    sample = np.random.randn(optim_batchsize, 1, ob_expert['node'].shape[-2])
+                    sample = np.random.randn(optim_batchsize, 1, ob_expert['node'].shape[-1])
                     #print(sample.shape)
                     loss_expert, kl_loss, g_expert = lossandgrad_expert(ob_expert['adj'], ob_expert['node'], ori_smi_vec, sample, ac_expert, ac_expert)
                     #expert_kl_loss, expert_g_kl = lossandgrad_kl(batch["cond_ob_adj"], batch["cond_ob_node"])
