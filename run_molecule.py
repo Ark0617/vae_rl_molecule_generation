@@ -31,6 +31,9 @@ def train(args, seed, writer=None):
         env.init(reward_step_total=args.reward_step_total, is_normalize=args.normalize_adj, dataset=args.dataset) # remember call this after gym.make!!
     print(env.observation_space)
 
+    # if not os.path.exists(args.traj_data_path):
+    #     env.store_all_expert_trajs(args)
+
     def policy_fn(name, ob_space, ac_space):
         return gcn_policy.GCNPolicy(name=name, ob_space=ob_space, ac_space=ac_space, atom_type_num=env.atom_type_num, char_type_num=len(env.smile_chars), args=args)
     env.seed(workerseed)
@@ -39,7 +42,7 @@ def train(args, seed, writer=None):
         max_timesteps=args.num_steps,
         timesteps_per_actorbatch=256,
         clip_param=0.2, entcoeff=0.01,
-        optim_epochs=8, optim_stepsize=args.lr, optim_batchsize=32,
+        optim_epochs=1, optim_stepsize=args.lr, optim_batchsize=32,
         gamma=1, lam=0.95,
         schedule='linear', writer=writer
     )
@@ -73,9 +76,7 @@ def molecule_arg_parser():
     parser.add_argument('--sa_ratio', type=float, default=1)
     parser.add_argument('--gan_step_ratio', type=float, default=1)
     parser.add_argument('--gan_final_ratio', type=float, default=1)
-    # parser.add_argument('--kl_expert_ratio', type=float, default=0.1)
-    # parser.add_argument('--kl_ppo_ratio', type=float, default=0.1)
-    parser.add_argument('--kl_g_ratio', type=float, default=0.5)
+    parser.add_argument('--kl_ratio', type=float, default=1)
     parser.add_argument('--recons_ratio', type=float, default=1)
     parser.add_argument('--reward_step_total', type=float, default=0.5)
     parser.add_argument('--lr', type=float, default=1e-3)
@@ -123,6 +124,9 @@ def molecule_arg_parser():
     parser.add_argument('--enc_conv_layer_num', type=int, default=3)
     parser.add_argument('--enc_mid_layer_num', type=int, default=3)
     parser.add_argument('--padding', type=str, default='right')  # left, right, none
+    parser.add_argument('--smi_importance', type=int, default=1)
+    parser.add_argument('--trajs_num', type=int, default=10)
+    parser.add_argument('--traj_data_path', type=str, default='/Users/arkshi/Github/rl_graph_generation/gym-molecule/gym_molecule/dataset/trajs_data.pkl')
     return parser
 
 

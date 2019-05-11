@@ -1,0 +1,2 @@
+model_checkpoint_path: "molecule_zinc_test_conditional_qed_1_1_0.0_1.0_0"
+all_model_checkpoint_paths: "molecule_zinc_test_conditional_qed_1_1_0.0_1.0_0"

@@ -5,8 +5,11 @@ import pandas as pd
 import networkx as nx
 from rdkit import Chem
 from rdkit.Chem import GraphDescriptors
+from rdkit.Chem import rdmolops
 import numpy as np
-
+import pickle
+import sys
+import os
 # def mol_to_nx(mol):
 #     G = nx.Graph()
 #
@@ -24,6 +27,19 @@ import numpy as np
 #                    bond.GetEndAtomIdx(),
 #                    bond_type=bond.GetBondType())
 #     return G
+bond_dict = {'SINGLE':0, 'DOUBLE':1, 'TRIPLE':2, 'AROMATIC':3}
+
+
+def get_atom_types(dataset):
+    atom_types = []
+    if dataset == 'gdb':
+        atom_types = ['C', 'N', 'O', 'S', 'Cl']  # gdb 13
+    elif dataset == 'zinc':
+        atom_types = ['C', 'N', 'O', 'S', 'P', 'F', 'I', 'Cl',
+                      'Br']  # ZINC
+    elif dataset == 'qm9':
+        atom_types = ['H', 'C', 'N', 'O', 'F']  # qm9
+    return atom_types
 
 
 def mol_to_nx(mol):
@@ -74,6 +90,13 @@ def nx_to_mol(G):
     Chem.SanitizeMol(mol)
     return mol
 
+
+def need_kekulize(mol):
+    for bond in mol.GetBonds():
+        if bond_dict[str(bond.GetBondType())] >= 3:
+            return True
+    return False
+
 def load_dataset(path):
   """
   Loads gdb13 dataset from path to pandas dataframe
@@ -99,6 +122,7 @@ def sort_dataset(in_path, out_path):
     sorted_df = in_df.sort_values(by=['BertzCT'])
     sorted_df['smiles'].to_csv(out_path, index=False)
 
+
 class gdb_dataset:
   """
   Simple object to contain the gdb13 dataset
@@ -119,18 +143,72 @@ class gdb_dataset:
     mol = Chem.MolFromSmiles(smiles)
     return mol
 
-# # TESTS
-# path = 'gdb13.rand1M.smi.gz'
-# dataset = gdb_dataset(path)
-#
-# print(len(dataset))
-# mol,_ = dataset[0]
-# graph = mol_to_nx(mol)
-# graph_sub = graph.subgraph([0,3,5,7,9])
-# graph_sub_new = nx.convert_node_labels_to_integers(graph_sub,label_attribute='old')
-# graph_sub_node = graph_sub.nodes()
-# graph_sub_new_node = graph_sub_new.nodes()
-# matrix = nx.adjacency_matrix(graph_sub)
-# np_matrix = matrix.toarray()
-# print(np_matrix)
-# print('end')
+
+def onehot(idx, len):
+    z = [0 for _ in range(len)]
+    z[idx] = 1
+    return z
+
+
+def find_carbon_idx(dataset, nodes):
+    has_carbon = False
+    for i in range(len(nodes)):
+        if dataset == 'qm9':
+            if np.argmax(nodes[i]) == 1:
+                has_carbon = True
+                return i
+        elif dataset == 'zinc':
+            if np.argmax(nodes[i]) == 0:
+                has_carbon = True
+                return i
+    if not has_carbon:
+        print("no carbon!")
+        return 0
+
+
+def to_graph(mol, dataset):
+    if mol is None:
+        return [], []
+    if need_kekulize(mol):
+        rdmolops.Kekulize(mol)
+        if mol is None:
+            return None, None
+    Chem.RemoveStereochemistry(mol)
+    edges = []
+    nodes = []
+    atom_types = get_atom_types(dataset)
+    for bond in mol.GetBonds():
+        edges.append((bond.GetBeginAtomIdx(), bond_dict[str(bond.GetBondType())], bond.GetEndAtomIdx()))
+        assert bond_dict[str(bond.GetBondType())] != 3
+    for atom in mol.GetAtoms():
+        nodes.append(onehot(atom_types.index(str(atom.GetSymbol())), len(atom_types)))
+    return nodes, edges
+
+
+def save_as_pickled_object(obj, filepath):
+    """
+    This is a defensive way to write pickle.write, allowing for very large files on all platforms
+    """
+    max_bytes = 2**31 - 1
+    bytes_out = pickle.dumps(obj)
+    n_bytes = sys.getsizeof(bytes_out)
+    with open(filepath, 'wb') as f_out:
+        for idx in range(0, n_bytes, max_bytes):
+            f_out.write(bytes_out[idx:idx+max_bytes])
+
+
+def try_to_load_as_pickled_object_or_None(filepath):
+    """
+    This is a defensive way to write pickle.load, allowing for very large files on all platforms
+    """
+    max_bytes = 2**31 - 1
+    try:
+        input_size = os.path.getsize(filepath)
+        bytes_in = bytearray(0)
+        with open(filepath, 'rb') as f_in:
+            for _ in range(0, input_size, max_bytes):
+                bytes_in += f_in.read(max_bytes)
+        obj = pickle.loads(bytes_in)
+    except:
+        return None
+    return obj

@@ -5,6 +5,7 @@ import os
 import functools
 import collections
 import multiprocessing
+from tensorflow.python.framework import ops
 
 def switch(condition, then_expression, else_expression):
     """Switches between two operations depending on a scalar value (int or bool).
@@ -174,6 +175,7 @@ class _Function(object):
         for inpt in inputs:
             if not hasattr(inpt, 'make_feed_dict') and not (type(inpt) is tf.Tensor and len(inpt.op.inputs) == 0):
                 assert False, "inputs should all be placeholders, constants, or have a make_feed_dict method"
+        self.outputs = outputs
         self.inputs = inputs
         updates = updates or []
         self.update_group = tf.group(*updates)
@@ -190,6 +192,8 @@ class _Function(object):
         assert len(args) <= len(self.inputs), "Too many arguments provided"
         feed_dict = {}
         # Update the args
+        # if isinstance(args[0], ops.Tensor):
+        #     return self.outputs
         for inpt, value in zip(self.inputs, args):
             self._feed_input(feed_dict, inpt, value)
         # Update feed dict with givens.

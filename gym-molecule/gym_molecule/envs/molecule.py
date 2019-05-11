@@ -11,18 +11,18 @@ import pandas as pd
 import copy
 import networkx as nx
 from gym_molecule.envs.sascorer import calculateScore
-from gym_molecule.dataset.dataset_utils import gdb_dataset, mol_to_nx, nx_to_mol
+from gym_molecule.dataset.dataset_utils import gdb_dataset, mol_to_nx, nx_to_mol, find_carbon_idx, to_graph, save_as_pickled_object, try_to_load_as_pickled_object_or_None
 import random
 import time
 import matplotlib
 matplotlib.use('PS')
 import matplotlib.pyplot as plt
 import csv
-
+from collections import defaultdict, deque
 from contextlib import contextmanager
 import sys, os
 import random
-
+import pickle
 # block std out
 @contextmanager
 def nostdout():
@@ -129,13 +129,18 @@ class MoleculeEnv(gym.Env):
         else:
             self.mol = Chem.RWMol()
         self.smile_list = []
+        self.number_to_atom = {}
         if data_type == 'gdb':
             possible_atoms = ['C', 'N', 'O', 'S', 'Cl']  # gdb 13
+            self.number_to_atom = {0: 'C', 1: 'N', 2: 'O', 3: 'S', 4: 'Cl'}
         elif data_type == 'zinc':
             possible_atoms = ['C', 'N', 'O', 'S', 'P', 'F', 'I', 'Cl',
                               'Br']  # ZINC
+            self.number_to_atom = {0: 'C', 1: 'N', 2: 'O', 3: 'S', 4: 'P', 5: 'F', 6: 'I', 7: 'Cl',
+                              8: 'Br'}
         elif data_type == 'qm9':
             possible_atoms = ['H', 'C', 'N', 'O', 'F']  # qm9
+            self.number_to_atom = {0: 'H', 1: 'C', 2: 'N', 3: 'O', 4: 'F'}
         if self.has_feature:
             self.possible_formal_charge = np.array([-1, 0, 1])
             self.possible_implicit_valence = np.array([-1, 0, 1, 2, 3, 4])
@@ -153,7 +158,7 @@ class MoleculeEnv(gym.Env):
         self.atom_type_num = len(possible_atoms)
         self.possible_atom_types = np.array(possible_atoms)
         self.possible_bond_types = np.array(possible_bonds, dtype=object)
-
+        self.num_to_bond = {0: Chem.rdchem.BondType.SINGLE, 1: Chem.rdchem.BondType.DOUBLE, 2: Chem.rdchem.BondType.TRIPLE}
         if self.has_feature:
             # self.d_n = len(self.possible_atom_types) + len(
             #     self.possible_formal_charge) + len(
@@ -189,6 +194,7 @@ class MoleculeEnv(gym.Env):
 
         ## load expert data
         cwd = os.path.dirname(__file__)
+        self.data_type = data_type
         if data_type == 'gdb':
             self.path = os.path.join(os.path.dirname(cwd), 'dataset',
                                 'gdb13.rand1M.smi.gz')  # gdb 13
@@ -252,8 +258,9 @@ class MoleculeEnv(gym.Env):
     def get_all_mols(self):
         mols = []
         data = gdb_dataset(self.path)
-        for i in range(len(data)):
+        for i in range(64): #len(data)
             print("Get mol " + str(i))
+            Chem.SanitizeMol(data[i], sanitizeOps=Chem.SanitizeFlags.SANITIZE_KEKULIZE)
             mols.append(data[i])
         mols = np.array(mols)
         np.random.shuffle(mols)
@@ -774,9 +781,21 @@ class MoleculeEnv(gym.Env):
             ob['adj'][idx]=ob_temp['adj']
         return ob
 
-    def get_expert(self, batch_size, is_final=False, curriculum=0, level_total=6, level=0):
+    def batch_smi2vec(self, args, smis):
+        X = np.zeros((len(smis), args.smi_max_length, len(self.smile_chars)), dtype=np.float32)
+        for i, smile in enumerate(smis):
+            for t, char in enumerate(smile):
+                X[i, t, self.smi2index[char]] = 1
+        return X
+
+    def smi2vec(self, args, smi):
+        x = np.zeros((args.smi_max_length, len(self.smile_chars)), dtype=np.float32)
+        for t, char in enumerate(smi):
+            x[t, self.smi2index[char]] = 1
+        return x
+
+    def get_ori_expert(self, batch_size, is_final=False, curriculum=0, level_total=6, level=0):
         ob = {}
-        ori_ob = {}
         atom_type_num = len(self.possible_atom_types)
         bond_type_num = len(self.possible_bond_types)
         ob['node'] = np.zeros((batch_size, 1, self.max_atom, self.d_n))
@@ -790,9 +809,9 @@ class MoleculeEnv(gym.Env):
             # print('--------------------------------------------------')
             ### get a subgraph
             if curriculum == 1:
-                ratio_start = level/float(level_total)
-                ratio_end = (level+1)/float(level_total)
-                idx = np.random.randint(int(ratio_start*dataset_len), int(ratio_end*dataset_len))
+                ratio_start = level / float(level_total)
+                ratio_end = (level + 1) / float(level_total)
+                idx = np.random.randint(int(ratio_start * dataset_len), int(ratio_end * dataset_len))
             else:
                 idx = np.random.randint(0, dataset_len)
             mol = self.dataset[idx]
@@ -802,7 +821,7 @@ class MoleculeEnv(gym.Env):
             # from rdkit.Chem import Draw
             # Draw.MolToFile(mol, 'ob_before'+str(i)+'.png')
             # mol = self.dataset[i] # sanitity check
-            #Chem.SanitizeMol(ori_mol, sanitizeOps=Chem.SanitizeFlags.SANITIZE_KEKULIZE)
+            # Chem.SanitizeMol(ori_mol, sanitizeOps=Chem.SanitizeFlags.SANITIZE_KEKULIZE)
             # ori_ob['node'][i] = self.mol_to_graph(ori_mol)['node']
             # ori_ob['adj'][i] = self.mol_to_graph(ori_mol)['adj']
             graph = mol_to_nx(mol)
@@ -812,31 +831,32 @@ class MoleculeEnv(gym.Env):
             #     is_final = True
 
             # select the edge num for the subgraph
+            # for j in range(samples_num):
             if is_final_temp:
                 edges_sub_len = len(edges)
             else:
                 # edges_sub_len = random.randint(1,len(edges))
-                edges_sub_len = random.randint(1, len(edges)+1)
-                if edges_sub_len == len(edges)+1:
+                edges_sub_len = random.randint(1, len(edges) + 1)
+                if edges_sub_len == len(edges) + 1:
                     edges_sub_len = len(edges)
                     is_final_temp = True
             edges_sub = random.sample(edges, k=edges_sub_len)
             graph_sub = nx.Graph(edges_sub)
             graph_sub = max(nx.connected_component_subgraphs(graph_sub), key=len)
-            if is_final_temp: # when the subgraph the whole molecule, the expert show stop sign
-                node1 = random.randint(0, mol.GetNumAtoms()-1)
+            if is_final_temp:  # when the subgraph the whole molecule, the expert show stop sign
+                node1 = random.randint(0, mol.GetNumAtoms() - 1)
                 while True:
-                    node2 = random.randint(0, mol.GetNumAtoms()+atom_type_num-1)
-                    if node2!=node1:
+                    node2 = random.randint(0, mol.GetNumAtoms() + atom_type_num - 1)
+                    if node2 != node1:
                         break
-                edge_type = random.randint(0,bond_type_num-1)
-                ac[i, :] = [node1, node2, edge_type, 1] # stop
+                edge_type = random.randint(0, bond_type_num - 1)
+                ac[i, :] = [node1, node2, edge_type, 1]  # stop
             else:
                 ### random pick an edge from the subgraph, then remove it
                 edge_sample = random.sample(graph_sub.edges(), k=1)
                 graph_sub.remove_edges_from(edge_sample)
                 graph_sub = max(nx.connected_component_subgraphs(graph_sub), key=len)
-                edge_sample = edge_sample[0] # get value
+                edge_sample = edge_sample[0]  # get value
                 ### get action
                 if edge_sample[0] in graph_sub.nodes() and edge_sample[1] in graph_sub.nodes():
                     node1 = graph_sub.nodes().index(edge_sample[0])
@@ -879,16 +899,16 @@ class MoleculeEnv(gym.Env):
                     # print(cycle_len_info)
                     float_array = np.concatenate([(graph.node[node]['symbol'] ==
                                                    self.possible_atom_types),
-                                                  ([len(cycle_info)==0]),
+                                                  ([len(cycle_info) == 0]),
                                                   ([3 in cycle_len_info]),
                                                   ([4 in cycle_len_info]),
                                                   ([5 in cycle_len_info]),
                                                   ([6 in cycle_len_info]),
-                                                  ([len(cycle_info)!=0 and (not 3 in cycle_len_info)
-                                                   and (not 4 in cycle_len_info)
-                                                   and (not 5 in cycle_len_info)
-                                                   and (not 6 in cycle_len_info)]
-                                                   )]).astype(float)
+                                                  ([len(cycle_info) != 0 and (not 3 in cycle_len_info)
+                                                    and (not 4 in cycle_len_info)
+                                                    and (not 5 in cycle_len_info)
+                                                    and (not 6 in cycle_len_info)]
+                                                  )]).astype(float)
                 else:
                     float_array = (graph.node[node]['symbol'] == self.possible_atom_types).astype(float)
 
@@ -908,7 +928,7 @@ class MoleculeEnv(gym.Env):
                 begin_idx = graph_sub.nodes().index(edge[0])
                 end_idx = graph_sub.nodes().index(edge[1])
                 bond_type = graph[edge[0]][edge[1]]['bond_type']
-                #print(bond_type)
+                # print(bond_type)
                 float_array = (bond_type == self.possible_bond_types).astype(float)
                 assert float_array.sum() != 0
                 ob['adj'][i, :, begin_idx, end_idx] = float_array
@@ -917,9 +937,333 @@ class MoleculeEnv(gym.Env):
                 # rw_mol.AddBond(begin_idx, end_idx, order=bond_type)
             if self.is_normalize:
                 ob['adj'][i] = self.normalize_adj(ob['adj'][i])
-            # print('ob',Chem.MolToSmiles(rw_mol, isomericSmiles=True))
+        return ob, ac, ori_smi
+
+    def get_batch_expert_traj(self, batch_size):
+        ob_seq = {}
+        atom_type_num = len(self.possible_atom_types)
+        bond_type_num = len(self.possible_bond_types)
+        ob_seq['node'] = np.zeros((batch_size, self.max_action, 1, self.max_atom, self.d_n))
+        ob_seq['adj'] = np.zeros((batch_size, self.max_action, bond_type_num, self.max_atom, self.max_atom))
+        ori_smi = []
+        ac_seq = np.zeros((batch_size, self.max_action, 4))
+        dataset_len = len(self.dataset)
+        for i in range(batch_size):
+            idx = np.random.randint(0, dataset_len)
+            mol = self.dataset[idx]
+            Chem.SanitizeMol(mol, sanitizeOps=Chem.SanitizeFlags.SANITIZE_KEKULIZE)
+            ori_smi.append(Chem.MolToSmiles(mol, isomericSmiles=True))
+            nodes, edges = to_graph(mol, self.data_type)
+            ob_seq['adj'][i], ob_seq['node'][i], ac_seq[i] = self.get_increment_traj(edges, nodes)
+        return ob_seq, ac_seq, ori_smi
+
+    def read_from_expert_trajs(self, args):
+        # traj_data = try_to_load_as_pickled_object_or_None(args.traj_data_path)
+        # print(traj_data)
+        adjs_seq = []
+        nodes_seq = []
+        acs_seq = []
+        smis = []
+        # i = 0
+        dataset_len = len(self.dataset)
+        print('=================Start reading traj data==================')
+        with open(args.traj_data_path, 'rb') as f:
+            for i in range(dataset_len):
+                data = pickle.load(f)
+                print(i)
+                per_mol_adj_seqs = []
+                per_mol_nodes_seqs = []
+                per_mol_ac_seqs = []
+                per_mol_smi_seqs = []
+                for traj in data:
+
+                    per_mol_adj_seqs.append(traj['adj_traj'])
+                    per_mol_nodes_seqs.append(traj['node_traj'])
+                    per_mol_ac_seqs.append(traj['ac_traj'])
+                    per_mol_smi_seqs.append([self.smi2vec(args, traj['smiles'])] * len(traj['adj_traj']))
+                adjs_seq.append(per_mol_adj_seqs)
+                nodes_seq.append(per_mol_nodes_seqs)
+                acs_seq.append(per_mol_ac_seqs)
+                smis.append(per_mol_smi_seqs)
+
+        return adjs_seq, nodes_seq, acs_seq, smis
+
+    def store_all_expert_trajs(self, args):
+        # traj_data = []
+        dataset_len = len(self.dataset)
+        print('===============Start storing traj data===============')
+        with open(args.traj_data_path, 'wb') as f:
+            for i in range(dataset_len):
+                print(i)
+                mol = self.dataset[i]
+                Chem.SanitizeMol(mol, sanitizeOps=Chem.SanitizeFlags.SANITIZE_KEKULIZE)
+                mol_trajs = []
+                for j in range(args.trajs_num):
+                    data = {}
+                    data['smiles'] = Chem.MolToSmiles(mol, isomericSmiles=True)
+                    nodes, edges = to_graph(mol, self.data_type)
+                    data['adj_traj'], data['node_traj'], data['ac_traj'] = self.get_increment_traj(edges, nodes)
+                    mol_trajs.append(data)
+                pickle.dump(mol_trajs, f)
+            # traj_data.append(mol_trajs)
+        # random.shuffle(traj_data)
+        # save_as_pickled_object(traj_data, args.traj_data_path)
+
+    def make_batch_iterator(self, args, batch_size):
+        all_mols = self.get_all_mols()
+        count = 0
+        while True:
+            one_batch_mol = np.random.choice(all_mols, batch_size)
+            batch_adjs_seq = []
+            batch_nodes_seq = []
+            batch_acs_seq = []
+            batch_smis = []
+            i = 0
+            for mol in one_batch_mol:
+                print(i)
+                per_mol_adj_seqs = []
+                per_mol_nodes_seqs = []
+                per_mol_ac_seqs = []
+                per_mol_smi_seqs = []
+                for j in range(args.trajs_num):
+                    nodes, edges = to_graph(mol, self.data_type)
+                    adj_traj, node_traj, ac_traj = self.get_increment_traj(edges, nodes)
+                    per_mol_smi_seqs.append([self.smi2vec(args, Chem.MolToSmiles(mol, isomericSmiles=True))] * len(adj_traj))
+                    per_mol_adj_seqs.append(adj_traj)
+                    per_mol_nodes_seqs.append(node_traj)
+                    per_mol_ac_seqs.append(ac_traj)
+                batch_adjs_seq.append(per_mol_adj_seqs)
+                batch_nodes_seq.append(per_mol_nodes_seqs)
+                batch_acs_seq.append(per_mol_ac_seqs)
+                batch_smis.append(per_mol_smi_seqs)
+                i += 1
+            yield batch_adjs_seq, batch_nodes_seq, batch_acs_seq, batch_smis
+
+    def get_increment_traj(self, edges, nodes):
+        incremental_adj_mat = np.zeros((self.max_action, len(self.possible_bond_types), self.max_atom, self.max_atom))
+        incremental_node_mat = np.zeros((self.max_action, 1, self.max_atom, self.d_n))
+        ac_seq = np.zeros((self.max_action, 4))
+        graph = defaultdict(list)
+        for src, edge_type, dst in edges:
+            graph[src].append((dst, edge_type))
+            graph[dst].append((src, edge_type))
+        initial_idx = find_carbon_idx(self.data_type, nodes)
+        node_in_focus = initial_idx
+        actual_nodes = []
+        actual_nodes.append(node_in_focus)
+        can_select_nodes = copy.deepcopy(actual_nodes)
+
+        cur_mol = Chem.rdchem.RWMol(Chem.MolFromSmiles(''))
+        cur_mol.AddAtom(Chem.Atom(self.number_to_atom[np.argmax(nodes[node_in_focus])]))
+        cur_ob = self.mol_to_graph(cur_mol)
+        incremental_adj_mat[0], incremental_node_mat[0] = cur_ob['adj'], cur_ob['node']
+        count = 0
+        while cur_mol.GetNumAtoms() < len(nodes) or cur_mol.GetNumBonds() < len(edges):
+            # print('====================')
+            # print(graph)
+            # print(edges)
+            # print(actual_nodes)
+            # print(node_in_focus)
+            # print(graph[node_in_focus])
+            # print(len(nodes))
+            # print(cur_mol.GetNumAtoms())
+            # print(len(actual_nodes))
+            # print(len(edges))
+            # print(cur_mol.GetNumBonds())
+            # print('====================')
+            select_adj = random.choice(graph[node_in_focus])
+            neighbor = select_adj[0]
+            edge_type = select_adj[1]
+            first_node = actual_nodes.index(node_in_focus)
+            if neighbor in actual_nodes:
+                second_node = actual_nodes.index(neighbor)
+                if not cur_mol.GetBondBetweenAtoms(first_node, second_node):
+                    cur_mol.AddBond(first_node, second_node, self.num_to_bond[edge_type])
+            else:
+                second_node = len(actual_nodes) + np.argmax(nodes[neighbor])
+                cur_mol.AddAtom(Chem.Atom(self.number_to_atom[np.argmax(nodes[neighbor])]))
+                cur_mol.AddBond(first_node, cur_mol.GetNumAtoms()-1, self.num_to_bond[edge_type])
+                actual_nodes.append(neighbor)
+                can_select_nodes.append(neighbor)
+
+            if cur_mol.GetNumAtoms() == len(nodes) and cur_mol.GetNumBonds() == len(edges):
+                ac_seq[count] = [first_node, second_node, edge_type, 1]
+            else:
+                ac_seq[count] = [first_node, second_node, edge_type, 0]
+            count += 1
+            cur_ob = self.mol_to_graph(cur_mol)
+            incremental_adj_mat[count], incremental_node_mat[count] = cur_ob['adj'], cur_ob['node']
+            graph[node_in_focus].remove(select_adj)
+            graph[neighbor].remove((node_in_focus, edge_type))
+            if len(graph[node_in_focus]) == 0:
+                can_select_nodes.remove(node_in_focus)
+            if len(can_select_nodes) == 0:
+                break
+
+            node_in_focus = random.choice(can_select_nodes)
+            # print(can_select_nodes)
+            if len(graph[node_in_focus]) == 0 and len(can_select_nodes) == 1:
+                break
+            while len(graph[node_in_focus]) == 0:
+                can_select_nodes.remove(node_in_focus)
+                if len(can_select_nodes) > 0:
+                    node_in_focus = random.choice(can_select_nodes)
+                else:
+                    break
+                if len(graph[node_in_focus]) > 0:
+                    break
+
+        incremental_adj_mat[count] = np.zeros((len(self.possible_bond_types), self.max_atom, self.max_atom))
+        incremental_node_mat[count] = np.zeros((1, self.max_atom, self.d_n))
+        assert len(incremental_adj_mat) == len(incremental_node_mat) == len(ac_seq)
+        return incremental_adj_mat, incremental_node_mat, ac_seq
+
+    def get_seq_expert(self, batch_size, samples_num, is_final=False, curriculum=0, level_total=6, level=0):
+        ob = {}
+        atom_type_num = len(self.possible_atom_types)
+        bond_type_num = len(self.possible_bond_types)
+        ob['node'] = np.zeros((batch_size, samples_num, 1, self.max_atom, self.d_n))
+        ob['adj'] = np.zeros((batch_size, samples_num, bond_type_num, self.max_atom, self.max_atom))
+        ori_smi = []
+        ac = np.zeros((batch_size, samples_num, 4))
+        ### select molecule
+        dataset_len = len(self.dataset)
+        for i in range(batch_size):
+            is_final_temp = is_final
+            # print('--------------------------------------------------')
+            ### get a subgraph
+            if curriculum == 1:
+                ratio_start = level/float(level_total)
+                ratio_end = (level+1)/float(level_total)
+                idx = np.random.randint(int(ratio_start*dataset_len), int(ratio_end*dataset_len))
+            else:
+                idx = np.random.randint(0, dataset_len)
+            mol = self.dataset[idx]
+            Chem.SanitizeMol(mol, sanitizeOps=Chem.SanitizeFlags.SANITIZE_KEKULIZE)
+            ori_smi.append(Chem.MolToSmiles(mol, isomericSmiles=True))
+            # print('ob_before',Chem.MolToSmiles(mol, isomericSmiles=True))
             # from rdkit.Chem import Draw
-            # Draw.MolToFile(rw_mol, 'ob' + str(i) + '.png')
+            # Draw.MolToFile(mol, 'ob_before'+str(i)+'.png')
+            # mol = self.dataset[i] # sanitity check
+            #Chem.SanitizeMol(ori_mol, sanitizeOps=Chem.SanitizeFlags.SANITIZE_KEKULIZE)
+            # ori_ob['node'][i] = self.mol_to_graph(ori_mol)['node']
+            # ori_ob['adj'][i] = self.mol_to_graph(ori_mol)['adj']
+            graph = mol_to_nx(mol)
+            edges = graph.edges()
+            # # always involve is_final probability
+            # if is_final==False and np.random.rand()<1.0/batch_size:
+            #     is_final = True
+
+            # select the edge num for the subgraph
+            for k in range(samples_num):
+                if is_final_temp:
+                    edges_sub_len = len(edges)
+                else:
+                    # edges_sub_len = random.randint(1,len(edges))
+                    edges_sub_len = random.randint(1, len(edges)+1)
+                    if edges_sub_len == len(edges)+1:
+                        edges_sub_len = len(edges)
+                        is_final_temp = True
+                edges_sub = random.sample(edges, k=edges_sub_len)
+                graph_sub = nx.Graph(edges_sub)
+                graph_sub = max(nx.connected_component_subgraphs(graph_sub), key=len)
+                if is_final_temp:  # when the subgraph the whole molecule, the expert show stop sign
+                    node1 = random.randint(0, mol.GetNumAtoms()-1)
+                    while True:
+                        node2 = random.randint(0, mol.GetNumAtoms()+atom_type_num-1)
+                        if node2 != node1:
+                            break
+                    edge_type = random.randint(0, bond_type_num-1)
+                    ac[i, k, :] = [node1, node2, edge_type, 1]  # stop
+                else:
+                    ### random pick an edge from the subgraph, then remove it
+                    edge_sample = random.sample(graph_sub.edges(), k=1)
+                    graph_sub.remove_edges_from(edge_sample)
+                    graph_sub = max(nx.connected_component_subgraphs(graph_sub), key=len)
+                    edge_sample = edge_sample[0]  # get value
+                    ### get action
+                    if edge_sample[0] in graph_sub.nodes() and edge_sample[1] in graph_sub.nodes():
+                        node1 = graph_sub.nodes().index(edge_sample[0])
+                        node2 = graph_sub.nodes().index(edge_sample[1])
+                    elif edge_sample[0] in graph_sub.nodes():
+                        node1 = graph_sub.nodes().index(edge_sample[0])
+                        node2 = np.argmax(
+                            graph.node[edge_sample[1]]['symbol'] == self.possible_atom_types) + graph_sub.number_of_nodes()
+                    elif edge_sample[1] in graph_sub.nodes():
+                        node1 = graph_sub.nodes().index(edge_sample[1])
+                        node2 = np.argmax(
+                            graph.node[edge_sample[0]]['symbol'] == self.possible_atom_types) + graph_sub.number_of_nodes()
+                    else:
+                        print('Expert policy error!')
+                    edge_type = np.argmax(graph[edge_sample[0]][edge_sample[1]]['bond_type'] == self.possible_bond_types)
+                    ac[i, k, :] = [node1, node2, edge_type, 0]  # don't stop
+                    # print('action',[node1,node2,edge_type,0])
+                # print('action',ac)
+                # plt.axis("off")
+                # nx.draw_networkx(graph_sub)
+                # plt.show()
+                ### get observation
+                # rw_mol = Chem.RWMol()
+                n = graph_sub.number_of_nodes()
+                for node_id, node in enumerate(graph_sub.nodes()):
+                    if self.has_feature:
+                        # float_array = np.concatenate([(graph.node[node]['symbol'] ==
+                        #                                self.possible_atom_types),
+                        #                               (graph.node[node]['formal_charge'] ==
+                        #                                self.possible_formal_charge),
+                        #                               (graph.node[node]['implicit_valence'] ==
+                        #                                self.possible_implicit_valence),
+                        #                               (graph.node[node]['ring_atom'] ==
+                        #                                self.possible_ring_atom),
+                        #                               (graph.node[node]['degree'] == self.possible_degree),
+                        #                               (graph.node[node]['hybridization'] ==
+                        #                                self.possible_hybridization)]).astype(float)
+                        cycle_info = nx.cycle_basis(graph_sub, node)
+                        cycle_len_info = [len(cycle) for cycle in cycle_info]
+                        # print(cycle_len_info)
+                        float_array = np.concatenate([(graph.node[node]['symbol'] ==
+                                                       self.possible_atom_types),
+                                                      ([len(cycle_info)==0]),
+                                                      ([3 in cycle_len_info]),
+                                                      ([4 in cycle_len_info]),
+                                                      ([5 in cycle_len_info]),
+                                                      ([6 in cycle_len_info]),
+                                                      ([len(cycle_info)!=0 and (not 3 in cycle_len_info)
+                                                       and (not 4 in cycle_len_info)
+                                                       and (not 5 in cycle_len_info)
+                                                       and (not 6 in cycle_len_info)]
+                                                       )]).astype(float)
+                    else:
+                        float_array = (graph.node[node]['symbol'] == self.possible_atom_types).astype(float)
+
+                    # assert float_array.sum() == 6
+                    ob['node'][i, k, 0, node_id, :] = float_array
+                    # print('node',node_id,graph.node[node]['symbol'])
+                    # atom = Chem.Atom(graph.node[node]['symbol'])
+                    # rw_mol.AddAtom(atom)
+                auxiliary_atom_features = np.zeros((atom_type_num, self.d_n))  # for padding
+                temp = np.eye(atom_type_num)
+                auxiliary_atom_features[:temp.shape[0], :temp.shape[1]] = temp
+                ob['node'][i, k, 0, n:n + atom_type_num, :] = auxiliary_atom_features
+
+                for j in range(bond_type_num):
+                    ob['adj'][i, k, j, :n + atom_type_num, :n + atom_type_num] = np.eye(n + atom_type_num)
+                for edge in graph_sub.edges():
+                    begin_idx = graph_sub.nodes().index(edge[0])
+                    end_idx = graph_sub.nodes().index(edge[1])
+                    bond_type = graph[edge[0]][edge[1]]['bond_type']
+                    #print(bond_type)
+                    float_array = (bond_type == self.possible_bond_types).astype(float)
+                    assert float_array.sum() != 0
+                    ob['adj'][i, k, :, begin_idx, end_idx] = float_array
+                    ob['adj'][i, k, :, end_idx, begin_idx] = float_array
+                    # print('edge',begin_idx,end_idx,bond_type)
+                    # rw_mol.AddBond(begin_idx, end_idx, order=bond_type)
+                if self.is_normalize:
+                    ob['adj'][i, k] = self.normalize_adj(ob['adj'][i, k])
+                # print('ob',Chem.MolToSmiles(rw_mol, isomericSmiles=True))
+                # from rdkit.Chem import Draw
+                # Draw.MolToFile(rw_mol, 'ob' + str(i) + '.png')
 
         return ob, ac, ori_smi
 
