@@ -258,7 +258,7 @@ class MoleculeEnv(gym.Env):
     def get_all_mols(self):
         mols = []
         data = gdb_dataset(self.path)
-        for i in range(64): #len(data)
+        for i in range(len(data)):  #len(data)
             print("Get mol " + str(i))
             Chem.SanitizeMol(data[i], sanitizeOps=Chem.SanitizeFlags.SANITIZE_KEKULIZE)
             mols.append(data[i])
@@ -1013,31 +1013,24 @@ class MoleculeEnv(gym.Env):
         all_mols = self.get_all_mols()
         count = 0
         while True:
-            one_batch_mol = np.random.choice(all_mols, batch_size)
-            batch_adjs_seq = []
-            batch_nodes_seq = []
-            batch_acs_seq = []
-            batch_smis = []
-            i = 0
+            one_batch_mol = np.random.choice(all_mols, 100)
+            big_batch_data = []
             for mol in one_batch_mol:
-                print(i)
-                per_mol_adj_seqs = []
-                per_mol_nodes_seqs = []
-                per_mol_ac_seqs = []
-                per_mol_smi_seqs = []
+                # per_mol_adj_seqs = []
+                # per_mol_nodes_seqs = []
+                # per_mol_ac_seqs = []
+                # per_mol_smi_seqs = []
                 for j in range(args.trajs_num):
+                    data = {}
                     nodes, edges = to_graph(mol, self.data_type)
                     adj_traj, node_traj, ac_traj = self.get_increment_traj(edges, nodes)
-                    per_mol_smi_seqs.append([self.smi2vec(args, Chem.MolToSmiles(mol, isomericSmiles=True))] * len(adj_traj))
-                    per_mol_adj_seqs.append(adj_traj)
-                    per_mol_nodes_seqs.append(node_traj)
-                    per_mol_ac_seqs.append(ac_traj)
-                batch_adjs_seq.append(per_mol_adj_seqs)
-                batch_nodes_seq.append(per_mol_nodes_seqs)
-                batch_acs_seq.append(per_mol_ac_seqs)
-                batch_smis.append(per_mol_smi_seqs)
-                i += 1
-            yield batch_adjs_seq, batch_nodes_seq, batch_acs_seq, batch_smis
+                    data['adj_traj'] = adj_traj
+                    data['node_traj'] = node_traj
+                    data['ac_traj'] = ac_traj
+                    data['smiles'] = Chem.MolToSmiles(mol, isomericSmiles=True)
+                    big_batch_data.append(data)
+
+            yield big_batch_data
 
     def get_increment_traj(self, edges, nodes):
         incremental_adj_mat = np.zeros((self.max_action, len(self.possible_bond_types), self.max_atom, self.max_atom))

@@ -42,7 +42,7 @@ def train(args, seed, writer=None):
         max_timesteps=args.num_steps,
         timesteps_per_actorbatch=256,
         clip_param=0.2, entcoeff=0.01,
-        optim_epochs=1, optim_stepsize=args.lr, optim_batchsize=32,
+        optim_epochs=8, optim_stepsize=args.lr, optim_batchsize=32,
         gamma=1, lam=0.95,
         schedule='linear', writer=writer
     )
@@ -127,6 +127,7 @@ def molecule_arg_parser():
     parser.add_argument('--smi_importance', type=int, default=1)
     parser.add_argument('--trajs_num', type=int, default=10)
     parser.add_argument('--traj_data_path', type=str, default='/Users/arkshi/Github/rl_graph_generation/gym-molecule/gym_molecule/dataset/trajs_data.pkl')
+    parser.add_argument('--samples_num', type=int, default=20)
     return parser
 
 

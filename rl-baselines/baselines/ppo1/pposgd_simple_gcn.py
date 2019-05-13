@@ -34,15 +34,14 @@ def smile_convert(args, string):
 #     return x
 #
 #
-# def make_batch(data):
-#     batch_seq_adj, batch_seq_node, batch_seq_ac, batch_smi = [], [], [], []
-#     for d in data:
-#         for traj in d:
-#             batch_seq_adj.append(traj['adj_traj'])
-#             batch_seq_node.append(traj['node_traj'])
-#             batch_seq_ac.append(traj['ac_traj'])
-#             batch_smi.append(traj['smiles'])
-#     return np.array(batch_seq_adj), np.array(batch_seq_node), np.array(batch_seq_ac), batch_smi
+def make_batch(data):
+    batch_seq_adj, batch_seq_node, batch_seq_ac, batch_smi = [], [], [], []
+    for d in data:
+        batch_seq_adj.append(d['adj_traj'])
+        batch_seq_node.append(d['node_traj'])
+        batch_seq_ac.append(d['ac_traj'])
+        batch_smi.append(d['smiles'])
+    return np.array(batch_seq_adj), np.array(batch_seq_node), np.array(batch_seq_ac), batch_smi
 
 
 def traj_segment_generator(args, pi, env, horizon, stochastic, d_step_func, d_final_func):
@@ -229,7 +228,7 @@ def traj_final_generator(args, pi, env, batch_size, stochastic):
     for i in range(batch_size):
         ob = env.reset()
         cur_cond_smile = random.sample(cond_smile, 1)[0]
-        cur_cond_smile_vec = smi2vec(args, env, smile_convert(args, cur_cond_smile))
+        cur_cond_smile_vec = env.smi2vec(args, smile_convert(args, cur_cond_smile))
         cur_cond_sample = np.random.randn(1, ob['node'].shape[-1])
         while True:
             ac, vpred = pi.cond_train_act(stochastic, ob, cur_cond_smile_vec, cur_cond_sample)
@@ -307,10 +306,10 @@ def learn(args, env, policy_fn, *,
     ob_real['adj'] = U.get_placeholder(shape=[None, ob_space['adj'].shape[0], None, None], dtype=tf.float32, name='adj_real')
     ob_real['node'] = U.get_placeholder(shape=[None, 1, None, ob_space['node'].shape[2]], dtype=tf.float32, name='node_real')
 
-    # ob_sequence_real = {}
-    # ob_sequence_real['adj'] = U.get_placeholder(shape=[None, env.max_action, ob_space['adj'].shape[0], None, None], dtype=tf.float32, name='adj_sequence_real')
-    # ob_sequence_real['node'] = U.get_placeholder(shape=[None, env.max_action, 1, None, ob_space['node'].shape[2]], dtype=tf.float32, name='node_sequence_real')
-    # ac_sequence_real = U.get_placeholder(shape=[None, env.max_action, 4], dtype=tf.int64, name='ac_sequence_real')
+    ob_sequence_real = {}
+    ob_sequence_real['adj'] = U.get_placeholder(shape=[None, env.max_action, ob_space['adj'].shape[0], None, None], dtype=tf.float32, name='adj_sequence_real')
+    ob_sequence_real['node'] = U.get_placeholder(shape=[None, env.max_action, 1, None, ob_space['node'].shape[2]], dtype=tf.float32, name='node_sequence_real')
+    ac_sequence_real = U.get_placeholder(shape=[None, env.max_action, 4], dtype=tf.int64, name='ac_sequence_real')
 
     ac = tf.placeholder(dtype=tf.int64, shape=[None, 4], name='ac_real')
     cond_mean, cond_logstd = pi.encoder(args, cond_smi_vec, ob_space['node'].shape[1])
@@ -344,16 +343,18 @@ def learn(args, env, policy_fn, *,
     surr2 = tf.clip_by_value(ratio, 1.0 - clip_param, 1.0 + clip_param) * atarg
     pol_surr = - tf.reduce_mean(tf.minimum(surr1, surr2))  # PPO's pessimistic surrogate (L^CLIP)
     vf_loss = tf.reduce_mean(tf.square(pi.vpred - ret))
-    total_loss = pol_surr + pol_entpen + vf_loss#+ args.kl_ppo_ratio * kl_loss
+    total_loss = pol_surr + pol_entpen + vf_loss #+ args.kl_ppo_ratio * kl_loss
     losses = [pol_surr, pol_entpen, vf_loss, meankl, meanent]
     loss_names = ["pol_surr", "pol_entpen", "vf_loss", "kl", "ent"]
     ## Expert loss
-    reconstruction_loss = -tf.reduce_mean(pi_logp) #+ args.kl_expert_ratio * kl_loss
+    #reconstruction_loss = -tf.reduce_mean(pi_logp) #+ args.kl_expert_ratio * kl_loss
     #print(pi.decoder(args, ob_sequence_real['adj'][:, 2, :, :, :], ob_sequence_real['node'][:, 2, :, :, :], pi.sample, ac_sequence_real[:, 2, :])[0].logp(ac_sequence_real[:, 2, :]).shape)
-    # generate_cross_entropy = lambda cross_entropy_loss, idx: (tf.add(cross_entropy_loss, tf.reduce_mean(pi.decoder(args, ob_sequence_real['adj'][:, idx, :, :, :], ob_sequence_real['node'][:, idx, :, :, :], pi.sample, ac_sequence_real[:, idx, :])[0].logp(ac_sequence_real[:, idx, :]))), tf.add(idx, 1))
-    # reconstruction_loss_total, final_idx = tf.while_loop(lambda cross_entropy_loss, idx: idx < env.max_action, generate_cross_entropy, (tf.constant(0, dtype=tf.float32), tf.constant(0)))
-    # reconstruction_loss = -tf.reduce_mean(reconstruction_loss_total)
+    generate_cross_entropy = lambda cross_entropy_loss, idx: (tf.add(cross_entropy_loss, pi.decoder(args, ob_sequence_real['adj'][:, idx, :, :, :], ob_sequence_real['node'][:, idx, :, :, :], pi.sample, ob_space, ac_sequence_real[:, idx, :])[0].logp(ac_sequence_real[:, idx, :])), tf.add(idx, 1))
+    reconstruction_loss_total, final_idx = tf.while_loop(lambda cross_entropy_loss, idx: idx < env.max_action, generate_cross_entropy, (tf.zeros((tf.shape(ob_sequence_real['adj'])[0],), dtype=tf.float32), tf.constant(0)))
+    reconstruction_loss = -tf.reduce_mean(reconstruction_loss_total)
     loss_expert = reconstruction_loss + args.kl_ratio * kl_loss
+
+    ori_loss_expert = -tf.reduce_mean(pi_logp) + args.kl_ratio * kl_loss
     ## Discriminator loss
     # loss_d_step, _, _ = discriminator(ob_real, ob_gen,args, name='d_step')
     # loss_d_gen_step,_ = discriminator_net(ob_gen,args, name='d_step')
@@ -404,7 +405,9 @@ def learn(args, env, policy_fn, *,
 
     ## loss update function
     lossandgrad_ppo = U.function([ob['adj'], ob['node'], cond_smi_vec, cond_sample, ac, pi.ac_real, oldpi.ac_real, atarg, ret, lrmult], losses + [U.flatgrad(total_loss, var_list_pi)])
-    lossandgrad_expert = U.function([ob['adj'], ob['node'], cond_smi_vec, cond_sample, ac, pi.ac_real], [loss_expert, kl_loss, U.flatgrad(loss_expert, var_list_pi)])
+    lossandgrad_seq_expert = U.function([ob_sequence_real['adj'], ob_sequence_real['node'], cond_smi_vec, cond_sample, ac_sequence_real], [loss_expert, kl_loss, U.flatgrad(loss_expert, var_list_pi)])
+
+    lossandgrad_expert = U.function([ob['adj'], ob['node'], cond_smi_vec, cond_sample, ac, pi.ac_real], [ori_loss_expert, kl_loss, U.flatgrad(ori_loss_expert, var_list_pi)])
     lossandgrad_expert_stop = U.function([ob['adj'], ob['node'], cond_smi_vec, cond_sample, ac, pi.ac_real], [loss_expert, U.flatgrad(loss_expert, var_list_pi_stop)])
     #lossandgrad_kl = U.function([cond_smi_vec], [kl_loss, U.flatgrad(kl_loss, var_list_encoder)])
     lossandgrad_d_step = U.function([ob_real['adj'], ob_real['node'], ob_gen['adj'], ob_gen['node']], [loss_d_step, U.flatgrad(loss_d_step, var_list_d_step)])
@@ -510,6 +513,7 @@ def learn(args, env, policy_fn, *,
 
 
             seg = seg_gen.__next__()
+            # expert_seg = batch_iterator.__next__()
             add_vtarg_and_adv(seg, gamma, lam)
             # ob, ac, atarg, ret, td1ret = map(np.concatenate, (obs, acs, atargs, rets, td1rets))
             ob_adj, ob_node, cond_smi_vec, normal_cond_sample, ac, atarg, tdlamret = seg["ob_adj"], seg["ob_node"], seg[ "cond_smi_vec"], seg["cond_sample"], seg["ac"], seg["adv"], seg["tdlamret"]
@@ -547,25 +551,23 @@ def learn(args, env, policy_fn, *,
                 ## Expert
                 if iters_so_far >= args.expert_start and iters_so_far <= args.expert_end + pretrain_shift:
                     ## Expert train
-                    # # # learn how to stop
-                    # ob_expert, ac_expert = env.get_expert(optim_batchsize, is_final=True)
-                    # loss_expert_stop, g_expert_stop = lossandgrad_expert_stop(ob_expert['adj'], ob_expert['node'], ac_expert,ac_expert)
-                    # loss_expert_stop = np.mean(loss_expert_stop)
-                    batch_adj_trajs, batch_node_trajs, batch_ac_trajs, batch_smis_vec = batch_iterator.__next__()
-                    batch_adj_trajs = np.array(batch_adj_trajs)
-                    batch_node_trajs = np.array(batch_node_trajs)
-                    batch_ac_trajs = np.array(batch_ac_trajs)
-                    batch_smis_vec = np.array(batch_smis_vec)
-                    batch_adjs = np.reshape(batch_adj_trajs, [-1, ob_space['adj'].shape[0], ob_space['adj'].shape[1], ob_space['adj'].shape[2]])
-                    batch_nodes = np.reshape(batch_node_trajs, [-1, ob_space['node'].shape[0], ob_space['node'].shape[1], ob_space['node'].shape[2]])
-                    batch_acs = np.reshape(batch_ac_trajs, [-1, 4])
-                    batch_smis = np.reshape(batch_smis_vec, [-1, args.smi_max_length, len(env.smile_chars)])
-                    # ob_experts, ac_experts, ori_smis = env.get_batch_expert_traj(optim_batchsize)  #env.get_expert(optim_batchsize, args.samples_num)
-                    samples = np.random.randn(optim_batchsize, 1, batch_node_trajs.shape[-1])
-                    samples = np.reshape(np.tile(np.expand_dims(samples, axis=1), [1, int(batch_smis.shape[0]/optim_batchsize), 1, 1]), [-1, 1, batch_node_trajs.shape[-1]])
-                    loss_expert, loss_kl, g_expert = lossandgrad_expert(batch_adjs, batch_nodes, batch_smis, samples, batch_acs, batch_acs)
-                    # loss_expert += loss_exp
-                    # g_expert += g_exp
+                    # ob_experts, ac_experts, ori_smis = env.get_seq_expert(optim_batchsize, args.samples_num)
+                    # ori_smi_vec = env.batch_smi2vec(args, ori_smis)
+                    # samples = np.random.randn(optim_batchsize, 1, ob_experts['node'].shape[-1])
+                    # for k in range(args.samples_num):
+                    #     print(k)
+                    #     loss_expert, loss_kl, g_expert = lossandgrad_expert(ob_experts['adj'][:, k, :, :, :], ob_experts['node'][:, k, :, :, :], ori_smi_vec, samples, ac_experts[:, k, :], ac_experts[:, k, :])
+                    #     adam_pi.update(g_expert, optim_stepsize * cur_lrmult)
+                    ob_expert, ac_expert, ori_smi = env.get_ori_expert(optim_batchsize)
+                    ori_smi_vec = env.batch_smi2vec(args, ori_smi)
+                    samples = np.random.randn(optim_batchsize, 1, ob_expert['node'].shape[-1])
+                    loss_expert, loss_kl, g_expert = lossandgrad_expert(ob_expert['adj'], ob_expert['node'], ori_smi_vec, samples, ac_expert, ac_expert)
+
+                    # batch_data = np.random.choice(expert_seg, optim_batchsize)
+                    # batch_adj_trajs, batch_node_trajs, batch_ac_trajs, batch_smis = make_batch(batch_data)
+                    # batch_smis_vec = env.batch_smi2vec(args, batch_smis)
+                    # samples = np.random.randn(optim_batchsize, 1, batch_node_trajs.shape[-1])
+                    # loss_expert, loss_kl, g_expert = lossandgrad_seq_expert(batch_adj_trajs, batch_node_trajs, batch_smis_vec, samples, batch_ac_trajs)
 
                 ## PPO
                 if iters_so_far >= args.rl_start and iters_so_far <= args.rl_end:
