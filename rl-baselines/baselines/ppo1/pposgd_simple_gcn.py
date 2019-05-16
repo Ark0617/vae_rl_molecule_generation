@@ -181,13 +181,13 @@ def traj_segment_generator(args, pi, env, horizon, stochastic, d_step_func, d_fi
         if new:
             if args.env == 'molecule':
                 if args.is_train == 1:
-                    with open('molecule_gen/'+args.name_full+'_'+args.reward_type+'.csv', 'a') as f:
-                        str = ''.join(['{},']*(len(info)+3))[:-1]+'\n'
-                        f.write(str.format(info['smile'], info['reward_valid'], info['reward_recons'], info['reward_qed'], info['reward_sa'], info['final_stat'], rew_env, rew_d_step, rew_d_final, cur_ep_ret, info['flag_steric_strain_filter'], info['flag_zinc_molecule_filter'], info['stop']))
+                    with open('molecule_gen/'+args.name_full+'_'+args.reward_type+'_'+str(args.smi_importance)+'.csv', 'a') as f:
+                        strg = ''.join(['{},']*(len(info)+3))[:-1]+'\n'
+                        f.write(strg.format(info['smile'], info['reward_valid'], info['reward_recons'], info['reward_qed'], info['reward_sa'], info['final_stat'], rew_env, rew_d_step, rew_d_final, cur_ep_ret, info['flag_steric_strain_filter'], info['flag_zinc_molecule_filter'], info['stop']))
                 else:
                     with open('molecule_gen/'+args.reward_type+'_generated' + '.smi', 'a') as f:
-                        str = info['smile']+'\n'
-                        f.write(str)
+                        strg = info['smile']+'\n'
+                        f.write(strg)
 
             ob_adjs_final.append(ob['adj'])
             ob_nodes_final.append(ob['node'])
@@ -693,7 +693,7 @@ def learn(args, env, policy_fn, *,
                 writer.add_scalar("TimeElapsed", time.time() - tstart, iters_so_far)
 
             if MPI.COMM_WORLD.Get_rank() == 0:
-                with open('molecule_gen/' + args.name_full +'_'+args.reward_type+'.csv', 'a') as f:
+                with open('molecule_gen/' + args.name_full +'_'+args.reward_type+'_'+str(args.smi_importance)+'.csv', 'a') as f:
                     f.write('***** Iteration {} *****\n'.format(iters_so_far))
                 # save
                 if iters_so_far % args.save_every == 0:

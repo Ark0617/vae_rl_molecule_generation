@@ -268,8 +268,17 @@ class GCNPolicy(object):
 
     def decoder(self, args, adj, node, sample, ob_space, ac_real):
         with tf.variable_scope('decoder', reuse=tf.AUTO_REUSE):
-            smi_feature_mat = tf.tile(sample, [1, 1, ob_space['node'].shape[1], 1])
-            ob_node = node + args.smi_importance * smi_feature_mat
+            strech_sample = tf.transpose(tf.layers.dense(sample, ob_space['node'].shape[1], activation=None), [0, 1, 3, 2])
+            # strech_sample = tf.layers.batch_normalization(strech_sample, axis=-1)
+            # smi_feature_mat = tf.tile(sample, [1, 1, ob_space['node'].shape[1], 1])
+            # smi_feature_mat = tf.layers.batch_normalization(smi_feature_mat, axis=-1)
+            # smi_feature_mat = tf.layers.dense(smi_feature_mat, ob_space['node'].shape[-1], activation=None)
+            # ob_node = tf.layers.batch_normalization(node, axis=-1)
+            # ob_node = tf.layers.dense(node, ob_space['node'].shape[-1], activation=None)
+            ob_node = tf.concat([node, args.smi_importance * strech_sample], axis=-1)#node * args.smi_importance * smi_feature_mat
+            if args.bn == 1:
+                ob_node = tf.layers.batch_normalization(ob_node, axis=-1)
+            ob_node = tf.layers.dense(ob_node, 8, activation=None)
             ob_node = GCN_batch(adj, ob_node, args.emb_size, name='fusion_gcn_1',
                                 aggregate=args.gcn_aggregate)
             ob_node = GCN_batch(adj, ob_node, args.emb_size, name='fusion_gcn_2',

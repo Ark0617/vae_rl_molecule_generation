@@ -124,7 +124,7 @@ def molecule_arg_parser():
     parser.add_argument('--enc_conv_layer_num', type=int, default=3)
     parser.add_argument('--enc_mid_layer_num', type=int, default=3)
     parser.add_argument('--padding', type=str, default='right')  # left, right, none
-    parser.add_argument('--smi_importance', type=int, default=1)
+    parser.add_argument('--smi_importance', type=float, default=1)
     parser.add_argument('--trajs_num', type=int, default=10)
     parser.add_argument('--traj_data_path', type=str, default='/Users/arkshi/Github/rl_graph_generation/gym-molecule/gym_molecule/dataset/trajs_data.pkl')
     parser.add_argument('--samples_num', type=int, default=20)
