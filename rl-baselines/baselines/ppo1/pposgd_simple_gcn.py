@@ -55,7 +55,7 @@ def traj_segment_generator(args, pi, env, horizon, stochastic, d_step_func, d_fi
     cur_cond_smile = random.sample(cond_smile, 1)[0]
     cur_cond_smile_vec = env.smi2vec(args, smile_convert(args, cur_cond_smile))
     env.update_cond_smile(cur_cond_smile)
-    cur_cond_sample = np.random.randn(1, ob['node'].shape[-1])
+    cur_cond_sample = np.random.randn(1, ob['node'].shape[-2])
     cur_ep_ret = 0  # return in current episode
     cur_ep_ret_env = 0
     cur_ep_ret_d_step = 0
@@ -212,7 +212,7 @@ def traj_segment_generator(args, pi, env, horizon, stochastic, d_step_func, d_fi
             cur_cond_smile_vec = env.smi2vec(args, smile_convert(args, cur_cond_smile))
             env.update_cond_smile(cur_cond_smile)
 
-            cur_cond_sample = np.random.randn(1, ob['node'].shape[-1])
+            cur_cond_sample = np.random.randn(1, ob['node'].shape[-2])
             ob = env.reset()
 
         t += 1
@@ -229,7 +229,7 @@ def traj_final_generator(args, pi, env, batch_size, stochastic):
         ob = env.reset()
         cur_cond_smile = random.sample(cond_smile, 1)[0]
         cur_cond_smile_vec = env.smi2vec(args, smile_convert(args, cur_cond_smile))
-        cur_cond_sample = np.random.randn(1, ob['node'].shape[-1])
+        cur_cond_sample = np.random.randn(1, ob['node'].shape[-2])
         while True:
             ac, vpred = pi.cond_train_act(stochastic, ob, cur_cond_smile_vec, cur_cond_sample)
             ob, rew_env, new, info = env.step(ac)
@@ -294,7 +294,7 @@ def learn(args, env, policy_fn, *,
     #cond_ob['ori_adj'] = tf.placeholder(shape=[None, ob_space['adj'].shape[0], None, None], dtype=tf.float32, name='cond_adj')
     cond_smi_vec = U.get_placeholder(name='cond_smi', dtype=tf.float32, shape=[None, args.smi_max_length, len(env.smile_chars)])
 
-    cond_sample = U.get_placeholder(name='normal_cond_sample', dtype=tf.float32, shape=[None, 1, ob_space['node'].shape[2]])
+    cond_sample = U.get_placeholder(name='normal_cond_sample', dtype=tf.float32, shape=[None, 1, ob_space['node'].shape[1]])
     # cond_mean = tf.placeholder(shape=[None, 1, None, args.emb_size], name='cond_mean', dtype=tf.float32)
     # cond_logstd = tf.placeholder(shape=[None, 1, None, args.emb_size], name='cond_logstd', dtype=tf.float32)
 
@@ -312,20 +312,12 @@ def learn(args, env, policy_fn, *,
     ac_sequence_real = U.get_placeholder(shape=[None, env.max_action, 4], dtype=tf.int64, name='ac_sequence_real')
 
     ac = tf.placeholder(dtype=tf.int64, shape=[None, 4], name='ac_real')
-    cond_mean, cond_logstd = pi.encoder(args, cond_smi_vec, ob_space['node'].shape[1])
-    #print(cond_logstd.shape)
-    # cond_mean = tf.expand_dims(cond_mean, axis=1)
-    # cond_logstd = tf.expand_dims(cond_logstd, axis=1)
-    # cond_mean = tf.squeeze(cond_mean, axis=1)
-    # cond_logstd = tf.squeeze(cond_logstd, axis=1)
-    kl_loss = tf.reduce_mean(-0.5 * tf.reduce_sum(tf.reduce_sum(1 + cond_logstd - tf.square(cond_mean) - tf.exp(cond_logstd), axis=2), axis=1))
-    # temp_ob_adj_gen = tf.reshape(ob_gen['adj'], [-1])
-    # temp_ob_node_gen = tf.reshape(ob_gen['node'], [-1])
-    # temp_ori_adj = tf.reshape(cond_ob['ori_adj'], [-1])
-    # temp_ori_node = tf.reshape(cond_ob['node'], [-1])
-    # recons_adj_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=temp_ori_adj, logits=temp_ob_adj_gen, name='adj_recons_loss'))
-    # recons_node_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=temp_ori_node, logits=temp_ob_node_gen, name='node_recons_loss'))
-    # recons_loss = recons_adj_loss + recons_node_loss
+    if args.has_attention == 0:
+        cond_mean, cond_logstd = pi.encoder(args, cond_smi_vec, ob_space['node'].shape[1])
+        kl_loss = tf.reduce_mean(-0.5 * tf.reduce_sum(tf.reduce_sum(1 + cond_logstd - tf.square(cond_mean) - tf.exp(cond_logstd), axis=2), axis=1))
+    else:
+        kl_loss = tf.constant(0, dtype=tf.float32)
+
 
     ## PPO loss
     kloldnew = oldpi.pd.kl(pi.pd)
@@ -343,18 +335,20 @@ def learn(args, env, policy_fn, *,
     surr2 = tf.clip_by_value(ratio, 1.0 - clip_param, 1.0 + clip_param) * atarg
     pol_surr = - tf.reduce_mean(tf.minimum(surr1, surr2))  # PPO's pessimistic surrogate (L^CLIP)
     vf_loss = tf.reduce_mean(tf.square(pi.vpred - ret))
-    total_loss = pol_surr + pol_entpen + vf_loss #+ args.kl_ppo_ratio * kl_loss
+    total_loss = pol_surr + pol_entpen + vf_loss  #+ args.kl_ppo_ratio * kl_loss
     losses = [pol_surr, pol_entpen, vf_loss, meankl, meanent]
     loss_names = ["pol_surr", "pol_entpen", "vf_loss", "kl", "ent"]
     ## Expert loss
     #reconstruction_loss = -tf.reduce_mean(pi_logp) #+ args.kl_expert_ratio * kl_loss
     #print(pi.decoder(args, ob_sequence_real['adj'][:, 2, :, :, :], ob_sequence_real['node'][:, 2, :, :, :], pi.sample, ac_sequence_real[:, 2, :])[0].logp(ac_sequence_real[:, 2, :]).shape)
-    generate_cross_entropy = lambda cross_entropy_loss, idx: (tf.add(cross_entropy_loss, pi.decoder(args, ob_sequence_real['adj'][:, idx, :, :, :], ob_sequence_real['node'][:, idx, :, :, :], pi.sample, ob_space, ac_sequence_real[:, idx, :])[0].logp(ac_sequence_real[:, idx, :])), tf.add(idx, 1))
+    generate_cross_entropy = lambda cross_entropy_loss, idx: (tf.add(cross_entropy_loss, pi.decoder(args, ob_sequence_real['adj'][:, idx, :, :, :], ob_sequence_real['node'][:, idx, :, :, :], pi.sample, ob_space, ac_sequence_real[:, idx, :], env.atom_type_num)[0].logp(ac_sequence_real[:, idx, :])), tf.add(idx, 1))
     reconstruction_loss_total, final_idx = tf.while_loop(lambda cross_entropy_loss, idx: idx < env.max_action, generate_cross_entropy, (tf.zeros((tf.shape(ob_sequence_real['adj'])[0],), dtype=tf.float32), tf.constant(0)))
     reconstruction_loss = -tf.reduce_mean(reconstruction_loss_total)
     loss_expert = reconstruction_loss + args.kl_ratio * kl_loss
-
-    ori_loss_expert = -tf.reduce_mean(pi_logp) + args.kl_ratio * kl_loss
+    if args.has_attention == 1:
+        ori_loss_expert = -tf.reduce_mean(pi_logp)
+    else:
+        ori_loss_expert = -tf.reduce_mean(pi_logp) + args.kl_ratio * kl_loss
     ## Discriminator loss
     # loss_d_step, _, _ = discriminator(ob_real, ob_gen,args, name='d_step')
     # loss_d_gen_step,_ = discriminator_net(ob_gen,args, name='d_step')
@@ -408,6 +402,8 @@ def learn(args, env, policy_fn, *,
     lossandgrad_seq_expert = U.function([ob_sequence_real['adj'], ob_sequence_real['node'], cond_smi_vec, cond_sample, ac_sequence_real], [loss_expert, kl_loss, U.flatgrad(loss_expert, var_list_pi)])
 
     lossandgrad_expert = U.function([ob['adj'], ob['node'], cond_smi_vec, cond_sample, ac, pi.ac_real], [ori_loss_expert, kl_loss, U.flatgrad(ori_loss_expert, var_list_pi)])
+    lossandgrad_attention_expert = U.function([ob['adj'], ob['node'], cond_smi_vec, ac, pi.ac_real],
+                                    [ori_loss_expert, U.flatgrad(ori_loss_expert, var_list_pi)])
     lossandgrad_expert_stop = U.function([ob['adj'], ob['node'], cond_smi_vec, cond_sample, ac, pi.ac_real], [loss_expert, U.flatgrad(loss_expert, var_list_pi_stop)])
     #lossandgrad_kl = U.function([cond_smi_vec], [kl_loss, U.flatgrad(kl_loss, var_list_encoder)])
     lossandgrad_d_step = U.function([ob_real['adj'], ob_real['node'], ob_gen['adj'], ob_gen['node']], [loss_d_step, U.flatgrad(loss_d_step, var_list_d_step)])
@@ -560,8 +556,11 @@ def learn(args, env, policy_fn, *,
                     #     adam_pi.update(g_expert, optim_stepsize * cur_lrmult)
                     ob_expert, ac_expert, ori_smi = env.get_ori_expert(optim_batchsize)
                     ori_smi_vec = env.batch_smi2vec(args, ori_smi)
-                    samples = np.random.randn(optim_batchsize, 1, ob_expert['node'].shape[-1])
-                    loss_expert, loss_kl, g_expert = lossandgrad_expert(ob_expert['adj'], ob_expert['node'], ori_smi_vec, samples, ac_expert, ac_expert)
+                    if args.has_attention == 0:
+                        samples = np.random.randn(optim_batchsize, 1, ob_expert['node'].shape[-2])
+                        loss_expert, loss_kl, g_expert = lossandgrad_expert(ob_expert['adj'], ob_expert['node'], ori_smi_vec, samples, ac_expert, ac_expert)
+                    else:
+                        loss_expert, g_expert = lossandgrad_attention_expert(ob_expert['adj'], ob_expert['node'], ori_smi_vec, ac_expert, ac_expert)
 
                     # batch_data = np.random.choice(expert_seg, optim_batchsize)
                     # batch_adj_trajs, batch_node_trajs, batch_ac_trajs, batch_smis = make_batch(batch_data)
