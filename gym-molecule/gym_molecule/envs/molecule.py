@@ -380,8 +380,12 @@ class MoleculeEnv(gym.Env):
             if action[0, 1] >= total_atoms:
                 self._add_atom(action[0, 1] - total_atoms)  # add new node
                 action[0, 1] = total_atoms  # new node id
+                print(action)
+                print(total_atoms)
                 self._add_bond(action)  # add new edge
             else:
+                print(action)
+                print(total_atoms)
                 self._add_bond(action)  # add new edge
         else:  # stop
             stop = True

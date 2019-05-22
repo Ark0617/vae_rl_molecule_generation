@@ -341,10 +341,10 @@ def learn(args, env, policy_fn, *,
     ## Expert loss
     #reconstruction_loss = -tf.reduce_mean(pi_logp) #+ args.kl_expert_ratio * kl_loss
     #print(pi.decoder(args, ob_sequence_real['adj'][:, 2, :, :, :], ob_sequence_real['node'][:, 2, :, :, :], pi.sample, ac_sequence_real[:, 2, :])[0].logp(ac_sequence_real[:, 2, :]).shape)
-    generate_cross_entropy = lambda cross_entropy_loss, idx: (tf.add(cross_entropy_loss, pi.decoder(args, ob_sequence_real['adj'][:, idx, :, :, :], ob_sequence_real['node'][:, idx, :, :, :], pi.sample, ob_space, ac_sequence_real[:, idx, :], env.atom_type_num)[0].logp(ac_sequence_real[:, idx, :])), tf.add(idx, 1))
-    reconstruction_loss_total, final_idx = tf.while_loop(lambda cross_entropy_loss, idx: idx < env.max_action, generate_cross_entropy, (tf.zeros((tf.shape(ob_sequence_real['adj'])[0],), dtype=tf.float32), tf.constant(0)))
-    reconstruction_loss = -tf.reduce_mean(reconstruction_loss_total)
-    loss_expert = reconstruction_loss + args.kl_ratio * kl_loss
+    # generate_cross_entropy = lambda cross_entropy_loss, idx: (tf.add(cross_entropy_loss, pi.decoder(args, ob_sequence_real['adj'][:, idx, :, :, :], ob_sequence_real['node'][:, idx, :, :, :], pi.sample, ob_space, ac_sequence_real[:, idx, :], env.atom_type_num)[0].logp(ac_sequence_real[:, idx, :])), tf.add(idx, 1))
+    # reconstruction_loss_total, final_idx = tf.while_loop(lambda cross_entropy_loss, idx: idx < env.max_action, generate_cross_entropy, (tf.zeros((tf.shape(ob_sequence_real['adj'])[0],), dtype=tf.float32), tf.constant(0)))
+    # reconstruction_loss = -tf.reduce_mean(reconstruction_loss_total)
+    # loss_expert = reconstruction_loss + args.kl_ratio * kl_loss
     if args.has_attention == 1:
         ori_loss_expert = -tf.reduce_mean(pi_logp)
     else:
@@ -399,12 +399,12 @@ def learn(args, env, policy_fn, *,
 
     ## loss update function
     lossandgrad_ppo = U.function([ob['adj'], ob['node'], cond_smi_vec, cond_sample, ac, pi.ac_real, oldpi.ac_real, atarg, ret, lrmult], losses + [U.flatgrad(total_loss, var_list_pi)])
-    lossandgrad_seq_expert = U.function([ob_sequence_real['adj'], ob_sequence_real['node'], cond_smi_vec, cond_sample, ac_sequence_real], [loss_expert, kl_loss, U.flatgrad(loss_expert, var_list_pi)])
+    # lossandgrad_seq_expert = U.function([ob_sequence_real['adj'], ob_sequence_real['node'], cond_smi_vec, cond_sample, ac_sequence_real], [loss_expert, kl_loss, U.flatgrad(loss_expert, var_list_pi)])
 
     lossandgrad_expert = U.function([ob['adj'], ob['node'], cond_smi_vec, cond_sample, ac, pi.ac_real], [ori_loss_expert, kl_loss, U.flatgrad(ori_loss_expert, var_list_pi)])
     lossandgrad_attention_expert = U.function([ob['adj'], ob['node'], cond_smi_vec, ac, pi.ac_real],
                                     [ori_loss_expert, U.flatgrad(ori_loss_expert, var_list_pi)])
-    lossandgrad_expert_stop = U.function([ob['adj'], ob['node'], cond_smi_vec, cond_sample, ac, pi.ac_real], [loss_expert, U.flatgrad(loss_expert, var_list_pi_stop)])
+    # lossandgrad_expert_stop = U.function([ob['adj'], ob['node'], cond_smi_vec, cond_sample, ac, pi.ac_real], [loss_expert, U.flatgrad(loss_expert, var_list_pi_stop)])
     #lossandgrad_kl = U.function([cond_smi_vec], [kl_loss, U.flatgrad(kl_loss, var_list_encoder)])
     lossandgrad_d_step = U.function([ob_real['adj'], ob_real['node'], ob_gen['adj'], ob_gen['node']], [loss_d_step, U.flatgrad(loss_d_step, var_list_d_step)])
     lossandgrad_d_final = U.function([ob_real['adj'], ob_real['node'], ob_gen['adj'], ob_gen['node']], [loss_d_final, U.flatgrad(loss_d_final, var_list_d_final)])
